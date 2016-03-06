@@ -6,10 +6,7 @@ import os
 from bokeh.plotting import figure, show
 from bokeh.io import output_notebook, hplot
 from bokeh.palettes import Spectral9, brewer
-import fragment_supp as supp                # Lots of routines for calculating stuff
-from scipy import stats as st
 from scipy import constants
-from scipy.interpolate import interp1d      # For rebinning the histograms
 from scipy import signal
 from scipy.optimize import curve_fit, fmin        # For fitting the gaussians
 import notebook as nb

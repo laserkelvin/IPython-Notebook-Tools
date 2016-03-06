@@ -37,17 +37,6 @@ def PandaRead(file,delimiter="\t"):
     df = df.dropna(axis=0)           # removes all NaN values
     return df
 
-def BokehPlot(plotarrayx,plotarrayy,legend,title=None,xlabel=None,ylabel=None):
-    from bokeh.io import output_notebook
-    from bokeh.plotting import figure
-    from bokeh.palettes import Spectral9
-    
-    nplots = len(plotarrayx)   # work out how many we need to plot
-    p = figure(title=title,plot_height=400,plot_width=800,x_axis_label=xlabel,y_axis_label=ylabel)
-    for i in range(nplots):    # loop over counter so we can also set the colour
-        p.line(plotarrayx[i],plotarrayy[i],legend=legend[i],color=Spectral9[i])
-    return p
-
 ################### Speed Distribution Analysis ###################
 
 # function to convert speed into kinetic energy, using data frames

@@ -418,7 +418,14 @@ def BootStrapError(Data, Function, InParameters, Bounds=(-np.inf, np.inf)):
             ModelY = HotGaussian(Data["X Range"], *InParameters)
             RandomNoise = np.random.rand(len(Data["X Range"])) * (max(ModelY) * 0.1)      # add 10% as noise
             SimulatedY = HotGaussian(Data["X Range"], *InParameters) + RandomNoise
-            return curve_fit(HotGaussian, Data["X Range"], SimulatedY, InParameters, bounds=Bounds)[0]
+            NewFitOpt = curve_fit(HotGaussian, Data["X Range"], SimulatedY, InParameters, bounds=Bounds)[0]
+            HotDistribution = gauss_function(Data["X Range"], NewFitOpt[0], 2600., 600.)
+            ColdDistribution = gauss_function(Data["X Range"], NewFitOpt[1], NewFitOpt[2], NewFitOpt[3])
+            HotIntegral = np.trapz(HotDistribution, Data["X Range"])
+            ColdIntegral = np.trapz(ColdDistribution, Data["X Range"])
+            Sum = HotIntegral + ColdIntegral
+            NewFitOpt.append(HotIntegral / Sum, ColdIntegral / Sum   )
+            return NewFitOpt
         except RuntimeError:
             pass
     if Function == "DoubleGB":
@@ -479,12 +486,12 @@ def BootStrapOutput(Function, ParametersArray):
         return pd.DataFrame(data = zip(Centre, Width, Temperature),
                             columns=["Centre","Width","Temperature"])
     if Function == "HotGaussian":
-        HotAmplitude = BootStrapAnalysis(ParametersArray[:,0])
-        ColdAmplitude = BootStrapAnalysis(ParametersArray[:,1])
+        HotFraction = BootStrapAnalysis(ParametersArray[:,4])
+        ColdFraction = BootStrapAnalysis(ParametersArray[:,5])
         ColdCentre = BootStrapAnalysis(ParametersArray[:,2])
         ColdWidth = BootStrapAnalysis(ParametersArray[:,3])
-        return pd.DataFrame(data = zip(HotAmplitude, ColdAmplitude, ColdCentre, ColdWidth),
-                            columns=["Hot Amplitude", "Cold Amplitude", "Cold Centre", "Cold Width"])
+        return pd.DataFrame(data = zip(HotFraction, ColdFraction, ColdCentre, ColdWidth),
+                            columns=["Hot Fraction", "Cold Fraction", "Cold Centre", "Cold Width"])
     if Function == "DoubleGB":
         CentreA = BootStrapAnalysis(ParametersArray[:,4])
         CentreB = BootStrapAnalysis(ParametersArray[:,5])

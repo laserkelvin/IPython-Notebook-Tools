@@ -6,6 +6,7 @@
 #import pybel as pb
 import pandas as pd
 import numpy as np
+from scipy.signal import savgol_filter
 #from chemviewer import enable_notebook, MolecularViewer
 #import openbabel as ob
 #from openbabel import OBElementTable as obt
@@ -70,3 +71,11 @@ def SplitArray(x,index):          # For a given array, split into two based on i
 def find_nearest(array,value):    # Returns the index for the value closest to the specified
     idx = (np.abs(array-value)).argmin()
     return idx
+
+# Uses the Savitzky-Golay filter to smooth an input array Y
+def SGFilter(Y, WindowSize, Order=2, Deriv=0, Rate=1):
+    if WindowSize % 2 ==0:
+        return savgol_filter(Y, WindowSize, Order, Deriv)
+    else:
+        print " WindowSize is " + str(WindowSize) + " which isn't odd!"
+        print " Please specify an odd number!"

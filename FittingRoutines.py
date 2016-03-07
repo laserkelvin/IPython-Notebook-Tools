@@ -386,7 +386,7 @@ def RunBootStrap(Data, OptimisedParameters, Function, Trials = 1000):
     print " Using function " + Function
     for trial in range(Trials):
         ParametersBin[trial] = BootStrapError(Data, Function, OptimisedParameters)
-        if trial % 100 == 0:
+        if trial % 100 == 0:                                     # Just a little progress bar
             print " Done " + str(trial) + " trials."
         else:
             pass
@@ -419,12 +419,15 @@ def BootStrapError(Data, Function, InParameters, Bounds=(-np.inf, np.inf)):
             RandomNoise = np.random.rand(len(Data["X Range"])) * (max(ModelY) * 0.1)      # add 10% as noise
             SimulatedY = HotGaussian(Data["X Range"], *InParameters) + RandomNoise
             NewFitOpt = curve_fit(HotGaussian, Data["X Range"], SimulatedY, InParameters, bounds=Bounds)[0]
+            # Generate individual distributions for integration
             HotDistribution = gauss_function(Data["X Range"], NewFitOpt[0], 2600., 600.)
             ColdDistribution = gauss_function(Data["X Range"], NewFitOpt[1], NewFitOpt[2], NewFitOpt[3])
+            # Use trapz to integrate distributions for ratio
             HotIntegral = np.trapz(HotDistribution, Data["X Range"])
             ColdIntegral = np.trapz(ColdDistribution, Data["X Range"])
             Sum = HotIntegral + ColdIntegral
-            NewFitOpt.append(HotIntegral / Sum, ColdIntegral / Sum   )
+            NewFitOpt = np.append(NewFitOpt, HotIntegral / Sum)
+            NewFitOpt = np.append(NewFitOpt, ColdIntegral / Sum)
             return NewFitOpt
         except RuntimeError:
             pass

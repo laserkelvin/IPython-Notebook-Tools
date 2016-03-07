@@ -383,7 +383,7 @@ def IntegrateSGB(Data, Parameters):
 # This way I don't have to keep copy-pasting how to run the analysis!
 def RunBootStrap(Data, OptimisedParameters, Function, Trials = 1000):
     ParameterBin = np.zeros((Trials, len(OptimisedParameters)), dtype=float)
-    for trial in Trials:
+    for trial in range(Trials):
         ParametersBin[trial] = BootStrapError(Data, Function, OptimisedParameters)
         if trial % 100 == 0:
             print " Done " + str(trial) + " trials."

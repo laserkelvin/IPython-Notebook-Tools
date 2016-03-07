@@ -379,6 +379,22 @@ def IntegrateSGB(Data, Parameters):
 
 ######################### Error Functions #########################
 
+# Wrote a function that will start the Bootstrap analysis process
+# This way I don't have to keep copy-pasting how to run the analysis!
+def RunBootStrap(Data, OptimisedParameters, Function, Trials = 1000):
+    NParameters = len(OptimisedParameters)
+    if Function == "HotGaussian" or "DoubleGB" or "SumGB":        # these functions also calculate ratios
+        NParameters = NParameters + 2
+    ParametersBin = np.zeros((Trials, NParameters), dtype=float)  # np.ndarray for holding the fitting results
+    print " Using function " + Function
+    for trial in range(Trials):
+        ParametersBin[trial] = BootStrapError(Data, Function, OptimisedParameters)
+        if trial % 100 == 0:                                     # Just a little progress bar
+            print " Done " + str(trial) + " trials."
+        else:
+            pass
+    return ParametersBin
+
 # Routine using Monte Carlo sampling for Bootstrap error analysis
 # First we take the optimised model parameters, and generate a new set of "synthetic" data
 # We then re-fit the synthetic data to gauge how well our optimised parameters
@@ -398,6 +414,24 @@ def BootStrapError(Data, Function, InParameters, Bounds=(-np.inf, np.inf)):
             RandomNoise = np.random.rand(len(Data[0])) * (max(ModelY) * 0.1)      # add 10% as noise
             SimulatedY = GaussMann(Data[0], *InParameters) + RandomNoise
             return curve_fit(GaussMann, Data[0], SimulatedY, InParameters, bounds=Bounds)[0]
+        except RuntimeError:
+            pass
+    if Function == "HotGaussian":
+        try:
+            ModelY = HotGaussian(Data["X Range"], *InParameters)
+            RandomNoise = np.random.rand(len(Data["X Range"])) * (max(ModelY) * 0.1)      # add 10% as noise
+            SimulatedY = HotGaussian(Data["X Range"], *InParameters) + RandomNoise
+            NewFitOpt = curve_fit(HotGaussian, Data["X Range"], SimulatedY, InParameters, bounds=Bounds)[0]
+            # Generate individual distributions for integration
+            HotDistribution = gauss_function(Data["X Range"], NewFitOpt[0], 2600., 600.)
+            ColdDistribution = gauss_function(Data["X Range"], NewFitOpt[1], NewFitOpt[2], NewFitOpt[3])
+            # Use trapz to integrate distributions for ratio
+            HotIntegral = np.trapz(HotDistribution, Data["X Range"])
+            ColdIntegral = np.trapz(ColdDistribution, Data["X Range"])
+            Sum = HotIntegral + ColdIntegral
+            NewFitOpt = np.append(NewFitOpt, HotIntegral / Sum)
+            NewFitOpt = np.append(NewFitOpt, ColdIntegral / Sum)
+            return NewFitOpt
         except RuntimeError:
             pass
     if Function == "DoubleGB":
@@ -457,6 +491,13 @@ def BootStrapOutput(Function, ParametersArray):
         Temperature = BootStrapAnalysis(ParametersArray[:,5])
         return pd.DataFrame(data = zip(Centre, Width, Temperature),
                             columns=["Centre","Width","Temperature"])
+    if Function == "HotGaussian":
+        HotFraction = BootStrapAnalysis(ParametersArray[:,4])
+        ColdFraction = BootStrapAnalysis(ParametersArray[:,5])
+        ColdCentre = BootStrapAnalysis(ParametersArray[:,2])
+        ColdWidth = BootStrapAnalysis(ParametersArray[:,3])
+        return pd.DataFrame(data = zip(HotFraction, ColdFraction, ColdCentre, ColdWidth),
+                            columns=["Hot Fraction", "Cold Fraction", "Cold Centre", "Cold Width"])
     if Function == "DoubleGB":
         CentreA = BootStrapAnalysis(ParametersArray[:,4])
         CentreB = BootStrapAnalysis(ParametersArray[:,5])

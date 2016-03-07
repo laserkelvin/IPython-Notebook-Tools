@@ -74,4 +74,8 @@ def find_nearest(array,value):    # Returns the index for the value closest to t
 
 # Uses the Savitzky-Golay filter to smooth an input array Y
 def SGFilter(Y, WindowSize, Order=2, Deriv=0, Rate=1):
-    return savgol_filter(Y, WindowSize, Order, Deriv)
+    if WindowSize % 2 ==0:
+        return savgol_filter(Y, WindowSize, Order, Deriv)
+    else:
+        print " WindowSize is " + str(WindowSize) + " which isn't odd!"
+        print " Please specify an odd number!"

@@ -400,6 +400,14 @@ def BootStrapError(Data, Function, InParameters, Bounds=(-np.inf, np.inf)):
             return curve_fit(GaussMann, Data[0], SimulatedY, InParameters, bounds=Bounds)[0]
         except RuntimeError:
             pass
+    if Function == "HotGaussian":
+        try:
+            ModelY = HotGaussian(Data["X Range"], *InParameters)
+            RandomNoise = np.random.rand(len(Data["X Range"])) * (max(ModelY) * 0.1)      # add 10% as noise
+            SimulatedY = HotGaussian(Data["X Range"], *InParameters) + RandomNoise
+            return curve_fit(HotGaussian, Data["X Range"], SimulatedY, InParameters, bounds=Bounds)[0]
+        except RuntimeError:
+            pass
     if Function == "DoubleGB":
         try:
             # This case is slightly modified to get the integrals as well
@@ -457,6 +465,13 @@ def BootStrapOutput(Function, ParametersArray):
         Temperature = BootStrapAnalysis(ParametersArray[:,5])
         return pd.DataFrame(data = zip(Centre, Width, Temperature),
                             columns=["Centre","Width","Temperature"])
+    if Function == "HotGaussian":
+        HotAmplitude = BootStrapAnalysis(ParametersArray[:,0])
+        ColdAmplitude = BootStrapAnalysis(ParametersArray[:,1])
+        ColdCentre = BootStrapAnalysis(ParametersArray[:,2])
+        ColdWidth = BootStrapAnalysis(ParametersArray[:,3])
+        return pd.DataFrame(data = zip(HotAmplitude, ColdAmplitude, ColdCentre, ColdWidth),
+                            columns=["Hot Amplitude", "Cold Amplitude", "Cold Centre", "Cold Width"])
     if Function == "DoubleGB":
         CentreA = BootStrapAnalysis(ParametersArray[:,4])
         CentreB = BootStrapAnalysis(ParametersArray[:,5])

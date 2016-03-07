@@ -382,7 +382,10 @@ def IntegrateSGB(Data, Parameters):
 # Wrote a function that will start the Bootstrap analysis process
 # This way I don't have to keep copy-pasting how to run the analysis!
 def RunBootStrap(Data, OptimisedParameters, Function, Trials = 1000):
-    ParametersBin = np.zeros((Trials, len(OptimisedParameters)), dtype=float)
+    NParameters = len(OptimisedParameters)
+    if Function == "HotGaussian" or "DoubleGB" or "SumGB":        # these functions also calculate ratios
+        NParameters = NParameters + 2
+    ParametersBin = np.zeros((Trials, NParameters), dtype=float)  # np.ndarray for holding the fitting results
     print " Using function " + Function
     for trial in range(Trials):
         ParametersBin[trial] = BootStrapError(Data, Function, OptimisedParameters)

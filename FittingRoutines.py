@@ -379,6 +379,18 @@ def IntegrateSGB(Data, Parameters):
 
 ######################### Error Functions #########################
 
+# Wrote a function that will start the Bootstrap analysis process
+# This way I don't have to keep copy-pasting how to run the analysis!
+def RunBootStrap(Data, OptimisedParameters, Function, Trials = 1000):
+    ParameterBin = np.zeros((Trials, len(OptimisedParameters)), dtype=float)
+    for trial in Trials:
+        ParametersBin[trial] = BootStrapError(Data, Function, OptimisedParameters)
+        if trial % 100 == 0:
+            print " Done " + str(trial) + " trials."
+        else:
+            pass
+    return ParameterBin
+
 # Routine using Monte Carlo sampling for Bootstrap error analysis
 # First we take the optimised model parameters, and generate a new set of "synthetic" data
 # We then re-fit the synthetic data to gauge how well our optimised parameters

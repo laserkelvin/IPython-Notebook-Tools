@@ -221,46 +221,52 @@ def FitBoundedDoubleConvolve(Name, Data, Parameters, Bounds=(-np.inf,np.inf), Er
 def FitTrueDoubleConvolve(Name, Data, Parameters, Bounds=(-np.inf,np.inf), Error=None):
     print "Initial parameters:\t" + str(Parameters)
     if Bounds != (-np.inf, np.inf):                           # if we're specifying boundary conditions
-        popt, pcov = curve_fit(TrueDoubleGaussMann, Data[0], Data[1], 
+        popt, pcov = curve_fit(TrueDoubleGaussMann, Data["X Range"], Data["Experiment"], 
                                Parameters, bounds=Bounds, method="trf", sigma=Error)
     else:                                                     # no conditions specified, default back
-        popt, pcov = curve_fit(TrueDoubleGaussMann, Data[0], Data[1], Parameters, sigma=Error)
-    Result = DoubleGaussMann(Data[0], *popt)
-    GB1 = GaussMann(Data[0], popt[1], popt[4], popt[6])
-    GB2 = GaussMann(Data[0], popt[0], popt[2], popt[3], popt[5], popt[7], popt[8])
-    FittedCurves = pd.DataFrame(data=zip(Data[0], Data[1], Result, Gaussian, GB),
-                                columns=["X Range", "Experiment", "Combined", "Gaussian", "Convolution"])
+        popt, pcov = curve_fit(TrueDoubleGaussMann, Data["X Range"], Data["Experiment"], Parameters, sigma=Error)
+    Result = TrueDoubleGaussMann(Data["X Range"], *popt)
+    GB1 = GaussMann(Data["X Range"], popt[0], popt[1], popt[3], popt[5], popt[7], popt[9])
+    GB2 = GaussMann(Data["X Range"], popt[0], popt[2], popt[4], popt[6], popt[8], popt[10])
+    FittedCurves = pd.DataFrame(data=zip(Data["X Range"], Data["Experiment"], Result, GB1, GB2),
+                                columns=["X Range", "Experiment", "Combined", "3F", "T1"])
     print "------------------------------------------------------"
-    print "     Bounded Double Convolved Gaussian Boltzmann      "
+    print "     True Double Convolved Gaussian Boltzmann      "
     print "------------------------------------------------------"
-    print "Double Convolved Gaussian + Boltzmann output for reference:\t" + str(Name)
+    print "True Double Convolved Gaussian Boltzmann output for reference:\t" + str(Name)
     print "Boundary Parameters:\t" + str(Bounds)
     print "------------------------------------------------------"
     print "Total Amplitude:\t" + str(popt[0]) + "\t \t 0"
     print "3F Gaussian Amplitude:\t" + str(popt[1]) + "\t \t 1"
     print "T1 Gaussian Amplitude:\t" + str(popt[2]) + "\t \t 2"
-    print "T1 Boltzmann Amplitude:\t" + str(popt[3]) + "\t \t 3"
-    print "3F Gaussian Centre: \t" + str(popt[4]) + "\t 1/cm \t 4" 
-    print "T1 Gaussian Centre:  \t" + str(popt[5]) + "\t 1/cm \t 5"
-    print "3F Gaussian Sigma:   \t" + str(popt[6]) + "\t 1/cm \t 6"
-    print "T1 Gaussian Sigma:   \t" + str(popt[7]) + "\t 1/cm \t 7"
-    print "T1 Boltzmann Temperature: \t" + str(popt[8]) + "\t K \t 8"
+    print "------------------------------------------------------"
+    print "3F Boltzmann Amplitude:\t" + str(popt[3]) + "\t \t 3"
+    print "T1 Boltzmann Amplitude:\t" + str(popt[4]) + "\t \t 4"
+    print "------------------------------------------------------"
+    print "3F Gaussian Centre: \t" + str(popt[5]) + "\t 1/cm \t 5" 
+    print "T1 Gaussian Centre:  \t" + str(popt[6]) + "\t 1/cm \t 6"
+    print "------------------------------------------------------"
+    print "3F Gaussian Sigma:   \t" + str(popt[7]) + "\t 1/cm \t 7"
+    print "T1 Gaussian Sigma:   \t" + str(popt[8]) + "\t 1/cm \t 8"
+    print "------------------------------------------------------"
+    print "3F Boltzmann Temperature: \t" + str(popt[9]) + "\t K \t 9"
+    print "T1 Boltzmann Temperature: \t" + str(popt[10]) + "\t K \t 10"
     print "------------------------------------------------------"
     p = figure(title=Name + "\tBounded Double Convolve GB", width=600, height=300,
                x_axis_label="CH3 Kinetic energy", x_range=[0,10000])
     p.background_fill_color="beige"
-    p.circle(Data[0], Data[1], color=brewer["Spectral"][4][0], legend="Data", radius=60, fill_alpha=0.6)
-    p.line(Data[0], FittedCurves["Combined"], color=brewer["Spectral"][4][3], legend="Fit",line_width=2)
-    p.line(Data[0], FittedCurves["Gaussian"], color=brewer["Spectral"][4][2], legend="3F",line_width=2)
-    p.line(Data[0], FittedCurves["Convolution"], color=brewer["Spectral"][4][1], legend="T1",line_width=2)
+    p.circle(Data["X Range"], Data["Experiment"], color=brewer["Spectral"][4][0], legend="Data", radius=60, fill_alpha=0.6)
+    p.line(Data["X Range"], FittedCurves["Combined"], color=brewer["Spectral"][4][3], legend="Fit",line_width=2)
+    p.line(Data["X Range"], FittedCurves["3F"], color=brewer["Spectral"][4][2], legend="3F",line_width=2)
+    p.line(Data["X Range"], FittedCurves["T1"], color=brewer["Spectral"][4][1], legend="T1",line_width=2)
     show(p)
-    GaussFrac = np.trapz(Gaussian, Data[0])
-    ConvolveFrac = np.trapz(GB, Data[0])
+    TripleFrac = np.trapz(GB1, Data["X Range"])
+    TripletFrac = np.trapz(GB2, Data["X Range"])
     print "Relative Branching Ratios:"
     print "------------------------------------------------------"
-    print "3F:\t " + str(GaussFrac / (ConvolveFrac + GaussFrac))
+    print "3F:\t " + str(TripleFrac / TripletFrac)
     print "------------------------------------------------------"
-    return FittedCurves, popt, pcov, GaussFrac / (ConvolveFrac + GaussFrac)
+    return FittedCurves, popt, pcov, TripleFrac / TripletFrac
 
 # Functional for fitting a sum of gaussian and boltzmann. This is used for the S0
 # distributions as the two distributions are a sum, not a convolution.

@@ -7,28 +7,6 @@
 import pandas as pd
 import numpy as np
 from scipy.signal import savgol_filter
-#from chemviewer import enable_notebook, MolecularViewer
-#import openbabel as ob
-#from openbabel import OBElementTable as obt
-
-################# ChemViewer ###################
-
-#def GetCoords(file,format):
-# routine for parsing a chemical file format into
-# python constructs with pybel and openbabel
-
-#    molecule = pb.readfile(format,file).next()  # load into pybel
-# get the coordinates, loop over individual atoms in molecule
-#    molcoords = [atom.coords for atom in molecule]
-# get the atomic numbers and then translate to atomic symbol
-#    molsym = [obt().GetSymbol(atom.atomicnum) for atom in molecule]
-#    return molcoords, molsym
-
-#def DrawMolecule(coords,symbols,bonds=None):
-# render a molecule in a notebook
-#    mv = MolecularViewer(coords,topology={'atom_types': symbols,'bonds': bonds})
-#    mv.ball_and_sticks()
-#    mv
 
 ################## General notebook functions ####################
 

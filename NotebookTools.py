@@ -6,17 +6,33 @@
 #import pybel as pb
 import pandas as pd
 import numpy as np
+import csv
+from scipy import constants
 from scipy.signal import savgol_filter
 
 ################## General notebook functions ####################
 
 # Because I'm a lazy and forgetful SOB write a function to read with pandas
-def PandaRead(file,delimiter="\t"):
-    df = pd.read_csv(file,delimiter=delimiter,header=None)  # by default delimiter is tab
+def PandaRead(file):
+    Delimiter = DetectDelimiter(file)
+    df = pd.read_csv(file,delimiter=Delimiter,header=None)
     df = df.dropna(axis=0)           # removes all NaN values
     return df
 
+def DetectDelimiter(File):
+    sniffer = csv.Sniffer()
+    f = open(File, "r")                   # open file and read the first line
+    fc = f.readline()
+    f.close()
+    line = sniffer.sniff(fc)
+    return line.delimiter
+
 ################### Speed Distribution Analysis ###################
+
+def amu2kg(Mass):
+    """Converts mass in atomic units to kg
+    """
+    return (Mass / constants.Avogadro) / 1000
 
 # function to convert speed into kinetic energy, using data frames
 def Speed2KER(Data, Mass):

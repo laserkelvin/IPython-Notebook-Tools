@@ -3,13 +3,17 @@
 import pandas as pd
 import numpy as np
 import os
+import matplotlib
+matplotlib.style.use('ggplot')
+import matplotlib.pyplot as plt
 from bokeh.plotting import figure, show
 from bokeh.io import output_notebook, hplot
 from bokeh.palettes import Spectral9, brewer
 from scipy import constants
 from scipy import signal
+from scipy import interpolate
 from scipy.optimize import curve_fit, fmin        # For fitting the gaussians
-import notebook as nb
+import NotebookTools as NT
 
 # unit conversion
 kcm = constants.physical_constants["Boltzmann constant in inverse meters per kelvin"][0] / 100.0
@@ -40,8 +44,24 @@ def straightline(x, m, c):
 # the convolution result vector the same as the input. This function is called by the fitting
 # routine.
 def GaussMann(x, A, aG, aB, x0, sigma, T):
-    return A * signal.fftconvolve(gauss_function(x, aG, x0, sigma), 
-                                  boltzmann_function(aB, x, T),mode="same")
+    Gaussian = gauss_function(x, aG, x0, sigma)
+    Boltzmann = boltzmann_function(aB, x, T)
+    Convolution = signal.fftconvolve(Gaussian, Boltzmann)
+    return A * Convolution
+
+def NewGaussMann(x, A, aG, aB, x0, sigma, T):
+    """ This function will return the convolution of a Gaussian and Boltzmann
+    in the original bin sizes without shifting.
+    """
+    BinSize = len(x) * 2 - 1
+    ConvolveX = np.linspace(x.iloc[0], x.iloc[-1], BinSize)
+    Gaussian = gauss_function(x, aG, x0, sigma)
+    Boltzmann = boltzmann_function(aB, x, T)
+    Convolution = signal.fftconvolve(Gaussian, Boltzmann)
+    Reshape = interpolate.interp1d(ConvolveX, Convolution, kind="nearest")
+    ReshapedConvolution = Reshape(x)
+    return A * ReshapedConvolution
+
 
 def HotGaussian(x, aG1, aG2, x0, sigma):
     return gauss_function(x, aG1, 2600., 600) + gauss_function(x, aG2, x0, sigma)
@@ -66,6 +86,41 @@ def DoubleGaussian(x, aG1, aG2, x01, x02, sigma1, sigma2):
 
 ######################### Fitting and printout routines #########################
 
+def NewConvolveGaussianBoltzmann(DataFrame, Parameters, Bounds=(-np.inf, np.inf)):
+    print "Initial parameters:\t" + str(Parameters)
+    OptimisedParameters, CovarianceMatrix = curve_fit(NewGaussMann,
+                                                      DataFrame["X Range"],
+                                                      DataFrame["Experiment"],
+                                                      Parameters,
+                                                      bounds=Bounds)
+    FitSummary = pd.DataFrame(data = OptimisedParameters,
+                              index = ["Amplitude",
+                                       "Gaussian Amplitude",
+                                       "Boltzmann Amplitude",
+                                       "Gaussian Centre",
+                                       "Gaussian Width",
+                                       "Boltzmann Temperature"],)
+    print FitSummary
+    ConvolutionResult = GaussMann(DataFrame["X Range"], *OptimisedParameters)
+    FitResults = pd.DataFrame(data = zip(DataFrame["Experiment"],
+                                         ConvolutionResult),
+                              columns = ["Experiment",
+                                         "Convolution"],
+                              index = DataFrame["X Range"])
+    plt.plot(FitResults.index, FitResults["Experiment"], "o")
+    plt.plot(FitResults.index, FitResults["Convolution"], "-")
+    plt.show()
+    #FitResults.plot(FitResults["index"], "Convolution")
+    #p = figure(width=600, height=300, x_axis_label="CH3 translational energy",
+    #           x_range=[0,10000])
+    #p.background_fill_color = "beige"
+    #p.circle(FitResults["X Range"], FitResults["Experiment"], legend = "Experiment",
+    #         color=brewer["Spectral"][5][0], radius=60, fill_alpha=0.6,)
+    #p.line(FitResults["X Range"], FitResults["Convolution"], legend = "Convolution",
+    #       color=brewer["Spectral"][5][4], line_width=2)
+    #show(p)
+    return FitResults, FitSummary
+
 # Function to do all of the fitting in a single fell swoop. Requires data as Panda input and an initial parameters
 # vector. Returns the fitted curve and prints optimal parameters. Name is only for internal reference.
 def FitGaussian(Name, Data, Parameters, Error=None):
@@ -76,6 +131,28 @@ def FitGaussian(Name, Data, Parameters, Error=None):
                                 columns=["X Range", "Experiment", "Gaussian"])
     print "------------------------------------------------------"
     print "                 Vanilla Gaussian Fit                 "
+    print "------------------------------------------------------"
+    print "Gaussian fitting output for reference:\t" + str(Name)
+    print "------------------------------------------------------"
+    print "Amplitude:\t" + str(popt[0])
+    print "Centre:\t" + str(popt[1]) + "\t 1/cm"
+    print "Width:\t" + str(popt[2]) + "\t 1/cm"
+    print "------------------------------------------------------"
+    p = figure(title=Name + "\tGaussian", width=600, height=300,
+               x_axis_label="CH3 Kinetic energy", x_range=[0,10000])
+    p.circle(Data[0],Data[1],color=Spectral9[0],legend="Data", radius=60, fill_alpha=0.6)
+    p.line(Data[0],FittedCurves["Gaussian"],color=Spectral9[7],legend="Fit",line_width=2)
+    show(p)
+    return FittedCurves, popt, pcov
+
+def FitBoundedGaussian(Name, Data, Parameters, Bounds=(-np.inf, np.inf)):
+    print "Initial parameters:\t" + str(Parameters)
+    popt, pcov = curve_fit(gauss_function, Data[0], Data[1], Parameters, bounds=Bounds, method="trf")
+    Result = [gauss_function(x, *popt) for x in Data[0]]
+    FittedCurves = pd.DataFrame(data=zip(Data[0], Data[1], Result),
+                                columns=["X Range", "Experiment", "Gaussian"])
+    print "------------------------------------------------------"
+    print "                 Bounded Gaussian Fit                 "
     print "------------------------------------------------------"
     print "Gaussian fitting output for reference:\t" + str(Name)
     print "------------------------------------------------------"

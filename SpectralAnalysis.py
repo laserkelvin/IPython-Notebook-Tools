@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import NotebookTools as NT
 import matplotlib
+import matplotlib.pyplot as plt
 #matplotlib.style.use('ggplot')
 from scipy import constants
 from scipy import signal
@@ -63,8 +64,12 @@ class Model:
 		"""
 		self.Function = ObjectiveFunction
 		self.Variables = dict.fromkeys(ObjectiveFunction.__code__.co_varnames)
-		self.BoundaryConditions = (dict.fromkeys(ObjectiveFunction.__code__.co_varnames, -np.inf),
-			                       dict.fromkeys(ObjectiveFunction.__code__.co_varnames, np.inf))
+		try:
+			del self.Variables["x"]                  # X keeps getting picked up, get rid of it
+		except KeyError:
+			pass
+		self.BoundaryConditions = ([-np.inf for Variable in self.Variables],
+			                       [np.inf for Varaible in self.Variables])
 		print " Initialised variable dictionary:"
 		print self.Variables
 	def SetVariables(self, Variables):
@@ -75,22 +80,36 @@ class Model:
 		"""
 		self.BoundaryConditions = Bounds
 
+def FormatData(X, Y):
+	""" Function to format data into a pandas data frame for
+	fitting. In case I'm too lazy to set it up myself.
+	"""
+	return pd.DataFrame(data=Y, columns=["Y Range"], index=X)
+
 def FitModel(DataFrame, Model):
 	""" Uses an instance of the Model class to fit data contained
 	in the pandas dataframe. Dataframe should have indices of the X-range
 	and column "Y Range" as the Y data to be fit to
 	"""
 	print " Curve fitting with:\t" + Model.FunctionName
-	print " Initial parameters:\t" + str(Model.Variables)
-	OptimisedParameters, CovarianceMatrix = curve_fit(Model.Function,
-													  DataFrame.index,
-													  DataFrame["Y Range"],
-													  p0=**Model.Variables,
-													  bounds=Model.BoundaryConditions)
-	ParameterReport = pd.DataFrame.from_dict(data=OptimisedParameters,
-		                                     orient="index")
-	return OptimisedParameters, ParameterReport, CovarianceMatrix
-
+	print " Initial parameters:"
+	try:
+		OptimisedParameters, CovarianceMatrix = curve_fit(Model.Function,
+														  DataFrame.index,
+														  DataFrame["Y Range"],
+														  p0=UnpackDict(**Model.Variables),
+														  bounds=Model.BoundaryConditions)
+		ParameterReport = pd.DataFrame(data=OptimisedParameters,
+			                           index=Model.Variables.keys())
+		ModelFit = Model.Function(DataFrame.index, *OptimisedParameters)
+		FittedCurves = pd.DataFrame(data=zip(DataFrame["Y Range"], ModelFit),
+			                        columns=["Data", "Model Fit"],
+			                        index=DataFrame.index)
+		print ParameterReport
+		return OptimisedParameters, ParameterReport, FittedCurves, CovarianceMatrix
+	except RuntimeError:
+		print " Fit has failed to converge. "
+		print " Re-assess your model!"
 
 ###################################################################################################
 
@@ -109,7 +128,7 @@ def BoltzmannFunction(x, Amplitude, Temperature):
 	return Amplitude * np.exp(1) / (kcm * Temperature) * x * np.exp(- x / (kcm * Temperature))
 
 def Linear(x, Gradient, Offset):
-	return Gradient * x + Offset
+	return x * Gradient + Offset
 
 def ConvolveArrays(A, B, X=None):
 	""" Special function that will return the convolution of two arrays 
@@ -130,6 +149,13 @@ def ConvolveArrays(A, B, X=None):
 ###################################################################################################
 
 """ File I/O and plotting functions """
+
+def UnpackDict(**args):
+	""" I don't know if there's a better way of doing this,
+	but I wrote this to upack a dictionary so we can parse 
+	a class dictionary and unpack it
+	"""
+	print args
 
 def LoadSpectrum(File):
 	""" Function for generating a pandas dataframe from a csv,
@@ -152,7 +178,10 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 	the X axis.
 	"""
 	NCols = len(DataFrame.columns)                            # Get the number of columns
-	Colours = brewer["Spectral"][NCols]                       # Set colours depending on how many
+	if NCols <= 2:
+		Colours = ["blue", "red"]
+	else:
+		Colours = brewer["Spectral"][NCols]                   # Set colours depending on how many
 	Headers = list(DataFrame.columns.values)                  # Get the column heads
 	if Interface == "pyplot":                                 # Use matplotlib library
 		if Labels != None:
@@ -180,9 +209,9 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 			except KeyError:
 				pass
 			plot = figure(width=500, height=400,                        # set up the labels
-				          x_label=XLabel, y_label=YLabel,
+				          x_axis_label=XLabel, y_axis_label=YLabel,
 				          title=Title,
-				          x_axis_range=XRange, y_axis_range=YRange)
+				          x_range=XRange, y_range=YRange)
 		else:
 			plot = figure(width=500, height=400)                        # if we have no labels
 		for Data in enumerate(DataFrame):

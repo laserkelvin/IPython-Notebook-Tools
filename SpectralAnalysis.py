@@ -166,14 +166,10 @@ def ConvolveArrays(A, B, X=None):
 	Requires input of two same-dimension arrays A and B, and an optional
 	1-D array that holds the X dimensions.
 	"""
-	TotalBins = len(A) + len(B) - 1                 # Calculate the number of convolution bins
-	if np.any(X) == None:
-		ConvolutionBins = np.linspace(0, 100, TotalBins)
-	else:
-		ConvolutionBins = np.linspace(X[0], X[-1], TotalBins)  # Linear interpolation for new convolution bins
+	BinSize = len(A)
 	ConvolutionResult = signal.fftconvolve(A, B, mode="full")
-	ReshapeConvolution = interpolate.interp1d(ConvolutionBins, ConvolutionResult, kind="linear")
-	return ReshapeConvolution(X)                    # Return same length as input X
+	ReshapedConvolution = np.resize(ConvolutionResult, BinSize)
+	return ReshapedConvolution                    # Return same length as input X
 
 ###################################################################################################
 

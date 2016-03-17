@@ -3,13 +3,17 @@
 import pandas as pd
 import numpy as np
 import os
+import matplotlib
+matplotlib.style.use('ggplot')
+import matplotlib.pyplot as plt
 from bokeh.plotting import figure, show
 from bokeh.io import output_notebook, hplot
 from bokeh.palettes import Spectral9, brewer
 from scipy import constants
 from scipy import signal
+from scipy import interpolate
 from scipy.optimize import curve_fit, fmin        # For fitting the gaussians
-import notebook as nb
+import NotebookTools as NT
 
 # unit conversion
 kcm = constants.physical_constants["Boltzmann constant in inverse meters per kelvin"][0] / 100.0
@@ -40,8 +44,29 @@ def straightline(x, m, c):
 # the convolution result vector the same as the input. This function is called by the fitting
 # routine.
 def GaussMann(x, A, aG, aB, x0, sigma, T):
-    return A * signal.fftconvolve(gauss_function(x, aG, x0, sigma), 
-                                  boltzmann_function(aB, x, T),mode="same")
+    Gaussian = gauss_function(x, aG, x0, sigma)
+    Boltzmann = boltzmann_function(aB, x, T)
+    Convolution = signal.fftconvolve(Gaussian, Boltzmann)
+    return A * Convolution
+
+def NewGaussMann(x, A, aG, aB, x0, sigma, T):
+    """ This function will return the convolution of a Gaussian and Boltzmann
+    in the original bin sizes without shifting.
+    """
+    BinSize = len(x) * 2 - 1                                         # Predict how large the convolution array wil be
+    ConvolveX = np.linspace(x.iloc[0], x.iloc[-1], BinSize)          # Generate a new X vector for the convolution
+    Gaussian = gauss_function(x, aG, x0, sigma)
+    Boltzmann = boltzmann_function(aB, x, T)
+    Convolution = signal.fftconvolve(Gaussian, Boltzmann)
+    Reshape = interpolate.interp1d(ConvolveX, Convolution, kind="nearest")
+    ReshapedConvolution = Reshape(x)
+    return A * ReshapedConvolution
+
+def NewDoubleGaussMann(x, A1, A2, x01, sigma1, x02, sigma2, T1, T2):
+    GBOne = NewGaussMann(x, A1, 1., 1., x01, sigma1, T1)
+    GBTwo = NewGaussMann(x, A2, 1., 1., x02, sigma2, T2)
+    Combined = GBOne + GBTwo
+    return Combined
 
 def HotGaussian(x, aG1, aG2, x0, sigma):
     return gauss_function(x, aG1, 2600., 600) + gauss_function(x, aG2, x0, sigma)
@@ -66,6 +91,97 @@ def DoubleGaussian(x, aG1, aG2, x01, x02, sigma1, sigma2):
 
 ######################### Fitting and printout routines #########################
 
+def NewConvolveGaussianBoltzmann(DataFrame, Parameters, Bounds=(-np.inf, np.inf), Plotting="pyplot"):
+    print "Initial parameters:\t" + str(Parameters)
+    OptimisedParameters, CovarianceMatrix = curve_fit(NewGaussMann,
+                                                      DataFrame["X Range"],
+                                                      DataFrame["Experiment"],
+                                                      Parameters,
+                                                      bounds=Bounds)
+    FitSummary = pd.DataFrame(data = OptimisedParameters,
+                              index = ["Amplitude",
+                                       "Gaussian Amplitude",
+                                       "Boltzmann Amplitude",
+                                       "Gaussian Centre",
+                                       "Gaussian Width",
+                                       "Boltzmann Temperature"],)
+    print FitSummary
+    ConvolutionResult = GaussMann(DataFrame["X Range"], *OptimisedParameters)
+    FitResults = pd.DataFrame(data = zip(DataFrame["Experiment"],
+                                         ConvolutionResult),
+                              columns = ["Experiment",
+                                         "Convolution"],
+                              index = DataFrame["X Range"])
+    if Plotting == "pyplot":
+        plt.plot(FitResults.index, FitResults["Experiment"], "o")
+        plt.plot(FitResults.index, FitResults["Convolution"], "-")
+        plt.show()
+    elif Plotting == "bokeh":
+        p = figure(width=600, height=300, x_axis_label="CH3 translational energy",
+                   x_range=[0,10000])
+        p.background_fill_color = "beige"
+        p.circle(FitResults.index, FitResults["Experiment"], legend = "Experiment",
+                 color=brewer["Spectral"][5][0], radius=60, fill_alpha=0.6,)
+        p.line(FitResults.index, FitResults["Convolution"], legend = "Convolution",
+               color=brewer["Spectral"][5][4], line_width=2)
+        show(p)
+    return FitResults, FitSummary
+
+def NewDoubleConvolveGaussianBoltzmann(DataFrame, Parameters, Bounds=(-np.inf, np.inf), Plotting="pyplot"):
+    print "Initial parameters:\t" + str(Parameters)
+    OptimisedParameters, CovarianceMatrix = curve_fit(NewDoubleGaussMann,
+                                                      DataFrame["X Range"],
+                                                      DataFrame["Experiment"],
+                                                      Parameters,
+                                                      bounds=Bounds)
+    FitSummary = pd.DataFrame(data = OptimisedParameters,
+                              index = ["Amplitude One",
+                                       "Amplitude Two",
+                                       "Gaussian One Centre",
+                                       "Gaussian One Width",
+                                       "Gaussian Two Centre",
+                                       "Gaussian Two Width",
+                                       "Temperature One",
+                                       "Temperature Two"])
+    print FitSummary
+    CombinedResult = NewDoubleGaussMann(DataFrame["X Range"], *OptimisedParameters)
+    ConvolutionOne = NewGaussMann(DataFrame["X Range"],
+                                 *[FitSummary[0]["Amplitude One"],
+                                  1.0,
+                                  1.0, 
+                                  FitSummary[0]["Gaussian One Centre"],
+                                  FitSummary[0]["Gaussian One Width"],
+                                  FitSummary[0]["Temperature One"]])
+    ConvolutionTwo = NewGaussMann(DataFrame["X Range"],
+                                 *[FitSummary[0]["Amplitude Two"],
+                                  1.0,
+                                  1.0, 
+                                  FitSummary[0]["Gaussian Two Centre"],
+                                  FitSummary[0]["Gaussian Two Width"],
+                                  FitSummary[0]["Temperature Two"]])
+    FitResults = pd.DataFrame(data = zip(DataFrame["Experiment"], CombinedResult, ConvolutionOne, ConvolutionTwo),
+                              columns = ["Experiment", "Combined", "Convolution One", "Convolution Two"],
+                              index = DataFrame["X Range"])
+    if Plotting == "pyplot":
+        plt.plot(FitResults.index, FitResults["Experiment"], "o", color="blue")
+        plt.plot(FitResults.index, FitResults["Combined"], "-", color="red")
+        plt.plot(FitResults.index, FitResults["Convolution One"], "-", color="magenta")
+        plt.plot(FitResults.index, FitResults["Convolution Two"], "-", color="green")
+        plt.show()
+    elif Plotting == "bokeh":
+        p = figure(width=600, height=300, x_axis_label="CH3 translational energy",
+                   x_range=[0,10000])
+        p.background_fill_color = "beige"
+        p.circle(FitResults.index, FitResults["Experiment"], legend = "Experiment",
+                 color=brewer["Spectral"][9][0], radius=60, fill_alpha=0.6,)
+        p.line(FitResults.index, FitResults["Combined"], legend = "Combined",
+               color=brewer["Spectral"][9][5], line_width=2)
+        p.line(FitResults.index, FitResults["Convolution One"], legend = "Convolution One",
+               color=brewer["Spectral"][9][7], line_width=2, line_alpha=0.6)
+        p.line(FitResults.index, FitResults["Convolution Two"], legend = "Convolution Two",
+               color=brewer["Spectral"][9][8], line_width=2, line_alpha=0.6)
+        show(p)
+
 # Function to do all of the fitting in a single fell swoop. Requires data as Panda input and an initial parameters
 # vector. Returns the fitted curve and prints optimal parameters. Name is only for internal reference.
 def FitGaussian(Name, Data, Parameters, Error=None):
@@ -76,6 +192,28 @@ def FitGaussian(Name, Data, Parameters, Error=None):
                                 columns=["X Range", "Experiment", "Gaussian"])
     print "------------------------------------------------------"
     print "                 Vanilla Gaussian Fit                 "
+    print "------------------------------------------------------"
+    print "Gaussian fitting output for reference:\t" + str(Name)
+    print "------------------------------------------------------"
+    print "Amplitude:\t" + str(popt[0])
+    print "Centre:\t" + str(popt[1]) + "\t 1/cm"
+    print "Width:\t" + str(popt[2]) + "\t 1/cm"
+    print "------------------------------------------------------"
+    p = figure(title=Name + "\tGaussian", width=600, height=300,
+               x_axis_label="CH3 Kinetic energy", x_range=[0,10000])
+    p.circle(Data[0],Data[1],color=Spectral9[0],legend="Data", radius=60, fill_alpha=0.6)
+    p.line(Data[0],FittedCurves["Gaussian"],color=Spectral9[7],legend="Fit",line_width=2)
+    show(p)
+    return FittedCurves, popt, pcov
+
+def FitBoundedGaussian(Name, Data, Parameters, Bounds=(-np.inf, np.inf)):
+    print "Initial parameters:\t" + str(Parameters)
+    popt, pcov = curve_fit(gauss_function, Data[0], Data[1], Parameters, bounds=Bounds, method="trf")
+    Result = [gauss_function(x, *popt) for x in Data[0]]
+    FittedCurves = pd.DataFrame(data=zip(Data[0], Data[1], Result),
+                                columns=["X Range", "Experiment", "Gaussian"])
+    print "------------------------------------------------------"
+    print "                 Bounded Gaussian Fit                 "
     print "------------------------------------------------------"
     print "Gaussian fitting output for reference:\t" + str(Name)
     print "------------------------------------------------------"
@@ -221,46 +359,52 @@ def FitBoundedDoubleConvolve(Name, Data, Parameters, Bounds=(-np.inf,np.inf), Er
 def FitTrueDoubleConvolve(Name, Data, Parameters, Bounds=(-np.inf,np.inf), Error=None):
     print "Initial parameters:\t" + str(Parameters)
     if Bounds != (-np.inf, np.inf):                           # if we're specifying boundary conditions
-        popt, pcov = curve_fit(TrueDoubleGaussMann, Data[0], Data[1], 
+        popt, pcov = curve_fit(TrueDoubleGaussMann, Data["X Range"], Data["Experiment"], 
                                Parameters, bounds=Bounds, method="trf", sigma=Error)
     else:                                                     # no conditions specified, default back
-        popt, pcov = curve_fit(TrueDoubleGaussMann, Data[0], Data[1], Parameters, sigma=Error)
-    Result = DoubleGaussMann(Data[0], *popt)
-    GB1 = GaussMann(Data[0], popt[1], popt[4], popt[6])
-    GB2 = GaussMann(Data[0], popt[0], popt[2], popt[3], popt[5], popt[7], popt[8])
-    FittedCurves = pd.DataFrame(data=zip(Data[0], Data[1], Result, Gaussian, GB),
-                                columns=["X Range", "Experiment", "Combined", "Gaussian", "Convolution"])
+        popt, pcov = curve_fit(TrueDoubleGaussMann, Data["X Range"], Data["Experiment"], Parameters, sigma=Error)
+    Result = TrueDoubleGaussMann(Data["X Range"], *popt)
+    GB1 = GaussMann(Data["X Range"], popt[0], popt[1], popt[3], popt[5], popt[7], popt[9])
+    GB2 = GaussMann(Data["X Range"], popt[0], popt[2], popt[4], popt[6], popt[8], popt[10])
+    FittedCurves = pd.DataFrame(data=zip(Data["X Range"], Data["Experiment"], Result, GB1, GB2),
+                                columns=["X Range", "Experiment", "Combined", "3F", "T1"])
     print "------------------------------------------------------"
-    print "     Bounded Double Convolved Gaussian Boltzmann      "
+    print "     True Double Convolved Gaussian Boltzmann      "
     print "------------------------------------------------------"
-    print "Double Convolved Gaussian + Boltzmann output for reference:\t" + str(Name)
+    print "True Double Convolved Gaussian Boltzmann output for reference:\t" + str(Name)
     print "Boundary Parameters:\t" + str(Bounds)
     print "------------------------------------------------------"
     print "Total Amplitude:\t" + str(popt[0]) + "\t \t 0"
     print "3F Gaussian Amplitude:\t" + str(popt[1]) + "\t \t 1"
     print "T1 Gaussian Amplitude:\t" + str(popt[2]) + "\t \t 2"
-    print "T1 Boltzmann Amplitude:\t" + str(popt[3]) + "\t \t 3"
-    print "3F Gaussian Centre: \t" + str(popt[4]) + "\t 1/cm \t 4" 
-    print "T1 Gaussian Centre:  \t" + str(popt[5]) + "\t 1/cm \t 5"
-    print "3F Gaussian Sigma:   \t" + str(popt[6]) + "\t 1/cm \t 6"
-    print "T1 Gaussian Sigma:   \t" + str(popt[7]) + "\t 1/cm \t 7"
-    print "T1 Boltzmann Temperature: \t" + str(popt[8]) + "\t K \t 8"
+    print "------------------------------------------------------"
+    print "3F Boltzmann Amplitude:\t" + str(popt[3]) + "\t \t 3"
+    print "T1 Boltzmann Amplitude:\t" + str(popt[4]) + "\t \t 4"
+    print "------------------------------------------------------"
+    print "3F Gaussian Centre: \t" + str(popt[5]) + "\t 1/cm \t 5" 
+    print "T1 Gaussian Centre:  \t" + str(popt[6]) + "\t 1/cm \t 6"
+    print "------------------------------------------------------"
+    print "3F Gaussian Sigma:   \t" + str(popt[7]) + "\t 1/cm \t 7"
+    print "T1 Gaussian Sigma:   \t" + str(popt[8]) + "\t 1/cm \t 8"
+    print "------------------------------------------------------"
+    print "3F Boltzmann Temperature: \t" + str(popt[9]) + "\t K \t 9"
+    print "T1 Boltzmann Temperature: \t" + str(popt[10]) + "\t K \t 10"
     print "------------------------------------------------------"
     p = figure(title=Name + "\tBounded Double Convolve GB", width=600, height=300,
                x_axis_label="CH3 Kinetic energy", x_range=[0,10000])
     p.background_fill_color="beige"
-    p.circle(Data[0], Data[1], color=brewer["Spectral"][4][0], legend="Data", radius=60, fill_alpha=0.6)
-    p.line(Data[0], FittedCurves["Combined"], color=brewer["Spectral"][4][3], legend="Fit",line_width=2)
-    p.line(Data[0], FittedCurves["Gaussian"], color=brewer["Spectral"][4][2], legend="3F",line_width=2)
-    p.line(Data[0], FittedCurves["Convolution"], color=brewer["Spectral"][4][1], legend="T1",line_width=2)
+    p.circle(Data["X Range"], Data["Experiment"], color=brewer["Spectral"][4][0], legend="Data", radius=60, fill_alpha=0.6)
+    p.line(Data["X Range"], FittedCurves["Combined"], color=brewer["Spectral"][4][3], legend="Fit",line_width=2)
+    p.line(Data["X Range"], FittedCurves["3F"], color=brewer["Spectral"][4][2], legend="3F",line_width=2)
+    p.line(Data["X Range"], FittedCurves["T1"], color=brewer["Spectral"][4][1], legend="T1",line_width=2)
     show(p)
-    GaussFrac = np.trapz(Gaussian, Data[0])
-    ConvolveFrac = np.trapz(GB, Data[0])
+    TripleFrac = np.trapz(GB1, Data["X Range"])
+    TripletFrac = np.trapz(GB2, Data["X Range"])
     print "Relative Branching Ratios:"
     print "------------------------------------------------------"
-    print "3F:\t " + str(GaussFrac / (ConvolveFrac + GaussFrac))
+    print "3F:\t " + str(TripleFrac / TripletFrac)
     print "------------------------------------------------------"
-    return FittedCurves, popt, pcov, GaussFrac / (ConvolveFrac + GaussFrac)
+    return FittedCurves, popt, pcov, TripleFrac / TripletFrac
 
 # Functional for fitting a sum of gaussian and boltzmann. This is used for the S0
 # distributions as the two distributions are a sum, not a convolution.
@@ -406,6 +550,14 @@ def BootStrapError(Data, Function, InParameters, Bounds=(-np.inf, np.inf)):
             RandomNoise = np.random.rand(len(Data[0])) * (max(ModelY) * 0.1)      # add 10% as noise
             SimulatedY = gauss_function(Data[0], *InParameters) + RandomNoise
             return curve_fit(gauss_function, Data[0], SimulatedY, InParameters, bounds=Bounds)[0]
+        except RuntimeError:
+            pass
+    if Function == "NGB":
+        try:
+            ModelY = NewGaussMann(Data["X Range"], *InParameters)
+            RandomNoise = np.random.rand(len(Data["X Range"])) * (max(ModelY) * 0.1)
+            SimulatedY = ModelY + RandomNoise
+            return curve_fit(NewGaussMann, Data["X Range"], SimulatedY, InParameters, bounds=Bounds)[0]
         except RuntimeError:
             pass
     if Function == "GB":

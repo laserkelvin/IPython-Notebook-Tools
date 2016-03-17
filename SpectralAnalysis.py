@@ -21,19 +21,25 @@ from bokeh.plotting import figure, show
 # routines.
 
 class Spectrum:
-	def __init__(self, File):
+	def __init__(self, File, Reference=None):
 		self.Data = LoadSpectrum(File)
 		self.PumpWavelength = 0.
 		self.ProbeWavelength = 0.
+		if Reference != None:                       # If we give it a logbook reference
+			self.Reference = Reference
 	def AddData(self, NewData, Name):
 		self.Data[Name] = NewData
 	def DeleteData(self, Name):
 		del self.Data[Name]
 	def PlotAll(self, Labels=None, Interface="pyplot"):
 		self.PlotLabels(Labels)                     # Initialise labels
-		PlotData(self.Data, Labels, Interface)
+		try:
+			self.Labels["Title"] = self.Reference
+		except KeyError:                            # Give up if we never gave it a logbook
+			pass
+		PlotData(self.Data, self.Labels, Interface)
 	def PlotLabels(self, Labels=None):
-		if Labels == None:                    # use default labels
+		if Labels == None:                          # use default labels
 			Labels = {"X Label": "X Axis",
 					  "Y Label": "Y Axis",
 					  "Title": " ",
@@ -74,11 +80,17 @@ class Model:
 		print self.Variables
 	def SetVariables(self, Variables):
 		self.Variables = Variables
+		print " Variables set to:\t" + str(self.Variables)
 	def SetBounds(self, Bounds):
 		""" Method for setting the boundary conditions for curve_fit,
 		requires input as 2-tuple list ([], [])
 		"""
 		self.BoundaryConditions = Bounds
+		print " Boundary conditions set to:\t" + str(self.BoundaryConditions)
+	def ResetAttributes(self):
+		""" Wipes the variable and boundary conditions
+		"""
+		self.SetFunction(self.Function)
 
 def FormatData(X, Y):
 	""" Function to format data into a pandas data frame for
@@ -90,6 +102,12 @@ def FitModel(DataFrame, Model):
 	""" Uses an instance of the Model class to fit data contained
 	in the pandas dataframe. Dataframe should have indices of the X-range
 	and column "Y Range" as the Y data to be fit to
+
+	Requires input of a DataFrame formatted using FormatData, and a reference
+	to an instance of Model.
+
+	Returns the optimised parameters, a fitting report as a dataframe,
+	the fitted curves for easy plotting, and the covariance matrix.
 	"""
 	print " Curve fitting with:\t" + Model.FunctionName
 	print " Boundary Conditions:"
@@ -106,11 +124,10 @@ def FitModel(DataFrame, Model):
 	FittedCurves = pd.DataFrame(data=zip(DataFrame["Y Range"], ModelFit),
 			                        columns=["Data", "Model Fit"],
 			                        index=DataFrame.index)
+	print " ------------------------------------------------------"
+	print " Parameter Report:"
 	print ParameterReport
 	return OptimisedParameters, ParameterReport, FittedCurves, CovarianceMatrix
-	#except RuntimeError:
-	#	print " Fit has failed to converge. "
-	#	print " Re-assess your model!"
 
 ###################################################################################################
 
@@ -125,8 +142,9 @@ def GaussianFunction(x, Amplitude, Centre, Width):
 # Unit conversion, kB from J/mol to 1/(cm mol)
 kcm = constants.physical_constants["Boltzmann constant in inverse meters per kelvin"][0] / 100.0
 
-def BoltzmannFunction(x, Amplitude, Temperature, Offset):
-	return Amplitude * np.exp(1) / (kcm * Temperature) * x * np.exp(- x / (kcm * Temperature)) + Offset
+def BoltzmannFunction(x, Amplitude, Temperature):
+	#return Amplitude * np.exp(1) / (kcm * Temperature) * x * np.exp(- x / (kcm * Temperature))
+	return Amplitude * np.sqrt(1 / (2 * np.pi * kcm * Temperature)**3) * 4 * np.pi * x * np.exp(-(x) / (kcm * Temperature))
 
 def Linear(x, Gradient, Offset):
 	return x * Gradient + Offset
@@ -139,16 +157,13 @@ def ConvolveArrays(A, B, X=None):
 	1-D array that holds the X dimensions.
 	"""
 	TotalBins = len(A) + len(B) - 1                 # Calculate the number of convolution bins
-	if X == None:
-		X = np.linspace(0, 100, TotalBins)
+	if np.any(X) == None:
+		ConvolutionBins = np.linspace(0, 100, TotalBins)
 	else:
-		ConvolutionBins = (X[0], X[-1], TotalBins)  # Linear interpolation for new convolution bins
+		ConvolutionBins = np.linspace(X[0], X[-1], TotalBins)  # Linear interpolation for new convolution bins
 	ConvolutionResult = signal.fftconvolve(A, B, mode="full")
 	ReshapeConvolution = interpolate.interp1d(ConvolutionBins, ConvolutionResult, kind="nearest")
 	return ReshapeConvolution(X)                    # Return same length as input X
-
-def SquareElement(A):
-	return A**2
 
 ###################################################################################################
 

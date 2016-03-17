@@ -5,7 +5,7 @@ import pandas as pd
 import NotebookTools as NT
 import matplotlib
 import matplotlib.pyplot as plt
-#matplotlib.style.use('ggplot')
+matplotlib.style.use('ggplot')
 from scipy import constants
 from scipy import signal
 from scipy.optimize import curve_fit
@@ -92,40 +92,41 @@ def FitModel(DataFrame, Model):
 	and column "Y Range" as the Y data to be fit to
 	"""
 	print " Curve fitting with:\t" + Model.FunctionName
+	print " Boundary Conditions:"
+	print str(Model.BoundaryConditions)
 	print " Initial parameters:"
-	try:
-		OptimisedParameters, CovarianceMatrix = curve_fit(Model.Function,
+	OptimisedParameters, CovarianceMatrix = curve_fit(Model.Function,
 														  DataFrame.index,
-														  DataFrame["Y Range"],
-														  p0=UnpackDict(**Model.Variables),
+														  DataFrame["Y Range"], 
+														  UnpackDict(**Model.Variables),
 														  bounds=Model.BoundaryConditions)
-		ParameterReport = pd.DataFrame(data=OptimisedParameters,
+	ParameterReport = pd.DataFrame(data=OptimisedParameters,
 			                           index=Model.Variables.keys())
-		ModelFit = Model.Function(DataFrame.index, *OptimisedParameters)
-		FittedCurves = pd.DataFrame(data=zip(DataFrame["Y Range"], ModelFit),
+	ModelFit = Model.Function(DataFrame.index, *OptimisedParameters)
+	FittedCurves = pd.DataFrame(data=zip(DataFrame["Y Range"], ModelFit),
 			                        columns=["Data", "Model Fit"],
 			                        index=DataFrame.index)
-		print ParameterReport
-		return OptimisedParameters, ParameterReport, FittedCurves, CovarianceMatrix
-	except RuntimeError:
-		print " Fit has failed to converge. "
-		print " Re-assess your model!"
+	print ParameterReport
+	return OptimisedParameters, ParameterReport, FittedCurves, CovarianceMatrix
+	#except RuntimeError:
+	#	print " Fit has failed to converge. "
+	#	print " Re-assess your model!"
 
 ###################################################################################################
 
 """ Commonly used base functions """
 
+def BaseGaussian(x, x0):
+	return np.exp(-np.square(x-x0))
+
 def GaussianFunction(x, Amplitude, Centre, Width):
-	""" Unnormalised Gaussian distribution that can be used for peak finding, blurring
-	and whatnot.
-	"""
-	return Amplitude * (1 / (Width * np.sqrt(2 * np.pi))) * np.exp(-(x - Centre)**2 / (2 * Width**2))
+	return Amplitude * (1 / (Width * np.sqrt(2 * np.pi))) * np.exp(-np.square(x - Centre) / (2 * Width**2))
 
 # Unit conversion, kB from J/mol to 1/(cm mol)
 kcm = constants.physical_constants["Boltzmann constant in inverse meters per kelvin"][0] / 100.0
 
-def BoltzmannFunction(x, Amplitude, Temperature):
-	return Amplitude * np.exp(1) / (kcm * Temperature) * x * np.exp(- x / (kcm * Temperature))
+def BoltzmannFunction(x, Amplitude, Temperature, Offset):
+	return Amplitude * np.exp(1) / (kcm * Temperature) * x * np.exp(- x / (kcm * Temperature)) + Offset
 
 def Linear(x, Gradient, Offset):
 	return x * Gradient + Offset
@@ -146,6 +147,9 @@ def ConvolveArrays(A, B, X=None):
 	ReshapeConvolution = interpolate.interp1d(ConvolutionBins, ConvolutionResult, kind="nearest")
 	return ReshapeConvolution(X)                    # Return same length as input X
 
+def SquareElement(A):
+	return A**2
+
 ###################################################################################################
 
 """ File I/O and plotting functions """
@@ -164,13 +168,12 @@ def LoadSpectrum(File):
 
 	Assumes two-column data.
 	"""
-	Delimiter = NT.DetectDelimiter(File)                               # detect what delimiter
-	Original = pd.read_csv(File, delimiter=delimiter, header=None)     # read file from csv
-	Original = df.dropna(axis=0)                                       # removes all NaN values
-	Packaged = pd.DataFrame(data=Original[1],
-		                    index=Original[0],
-		                    header=["Y Range"])
-	return Packaged
+	Delimiter = NT.DetectDelimiter(File)                          # detect what delimiter
+	DataFrame = pd.read_csv(File, delimiter=Delimiter,
+					 header=None, names=["Y Range"],
+					 index_col=0)     							  # read file from csv
+	DataFrame = DataFrame.dropna(axis=0)                          # removes all NaN values
+	return DataFrame
 
 def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 	""" A themed data plotting routine. Will use either matplotlib or
@@ -184,6 +187,7 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 		Colours = brewer["Spectral"][NCols]                   # Set colours depending on how many
 	Headers = list(DataFrame.columns.values)                  # Get the column heads
 	if Interface == "pyplot":                                 # Use matplotlib library
+		plt.figure(figsize=(10,5))
 		if Labels != None:
 			try:                                              # Unpack whatever we can from Labels
 				plt.xlabel(Labels["X Label"], fontsize=14.)

@@ -194,9 +194,9 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 			except KeyError:                    # Will ignore whatever isn't given in dictionary
 				pass
 		for Data in enumerate(DataFrame):
-			plt.plot(x=DataFrame.index, y=DataFrame[Data[1]],           # Plots with direct reference
-			        color=Colours[Data[0]], label=Headers[Data[0]])     # Aesthetics with index
-		plt.legend(mode="expand", ncol=2, loc=3)
+			plt.plot(DataFrame.index, DataFrame[Data[1]],           # Plots with direct reference
+			         color=Colours[Data[0]], label=Headers[Data[0]])     # Aesthetics with index
+		plt.legend(ncol=2, loc=9)
 		plt.show()
 	elif Interface == "bokeh":                                # Use bokeh library
 		if Labels != None:

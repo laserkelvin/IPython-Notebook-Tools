@@ -20,6 +20,10 @@ from bokeh.plotting import figure, show
 # My plan is to make FittingRoutines obsolete, as it has A LOT of poorly written
 # routines.
 
+###################################################################################################
+
+""" Classes """
+
 class Spectrum:
 	def __init__(self, File, Reference=None):
 		self.Data = LoadSpectrum(File)
@@ -92,6 +96,10 @@ class Model:
 		"""
 		self.SetFunction(self.Function)
 
+###################################################################################################
+
+""" Formatting and Fitting """
+
 def FormatData(X, Y):
 	""" Function to format data into a pandas data frame for
 	fitting. In case I'm too lazy to set it up myself.
@@ -134,6 +142,8 @@ def FitModel(DataFrame, Model):
 """ Commonly used base functions """
 
 def BaseGaussian(x, x0):
+	""" The most vanilla of Gaussians, wrote it when I was debugging
+	"""
 	return np.exp(-np.square(x-x0))
 
 def GaussianFunction(x, Amplitude, Centre, Width):
@@ -162,7 +172,7 @@ def ConvolveArrays(A, B, X=None):
 	else:
 		ConvolutionBins = np.linspace(X[0], X[-1], TotalBins)  # Linear interpolation for new convolution bins
 	ConvolutionResult = signal.fftconvolve(A, B, mode="full")
-	ReshapeConvolution = interpolate.interp1d(ConvolutionBins, ConvolutionResult, kind="nearest")
+	ReshapeConvolution = interpolate.interp1d(ConvolutionBins, ConvolutionResult, kind="linear")
 	return ReshapeConvolution(X)                    # Return same length as input X
 
 ###################################################################################################
@@ -172,7 +182,7 @@ def ConvolveArrays(A, B, X=None):
 def UnpackDict(**args):
 	""" I don't know if there's a better way of doing this,
 	but I wrote this to upack a dictionary so we can parse 
-	a class dictionary and unpack it
+	a class dictionary and unpack it into curve_fit
 	"""
 	print args
 

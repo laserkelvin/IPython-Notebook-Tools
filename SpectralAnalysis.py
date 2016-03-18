@@ -138,14 +138,16 @@ def ConvertSpeedDistribution(DataFrame, Mass, Units="cm"):
 		Conversion = 1.
 	if Units == "eV":        # eV
 		Conversion = .0103636
-	NRows = len(DataFrame.index)
-	KER = np.zeros((NRows), dtype=float)
-	PE = np.zeros((NRows), dtype=float)
-	for index in range(NRows):
-		KER[index] = ((DataFrame.index[index]**2) * Mass / 2000) * Conversion
-		PE[index] = DataFrame["Y Range"][index] / (Mass * DataFrame.index[index])
-		KERDataFrame = pd.DataFrame(data=PE, index=KER, columns=["Y Range"])
+	KER = (np.square(DataFrame.index) * (Mass / 1000.) / 2000.) * Conversion
+	PE = DataFrame["Y Range"].values / (Mass / 1000. * DataFrame.index)
+	KERDataFrame = pd.DataFrame(data=PE, index=KER, columns=["Y Range"])
+	KERDataFrame = KERDataFrame.dropna(axis=0)
 	return KERDataFrame
+
+def NormaliseColumn(DataFrame, Column="Y Range"):
+	""" Routine to normalise a column in pandas dataframes
+	"""
+	DataFrame[Column] = DataFrame[Column] / np.max(DataFrame[Column])
 
 def FormatData(X, Y):
 	""" Function to format data into a pandas data frame for

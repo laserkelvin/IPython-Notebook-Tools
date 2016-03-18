@@ -10,6 +10,7 @@ from scipy import constants
 from scipy import signal
 from scipy.optimize import curve_fit
 from scipy import interpolate
+import NotebookTools as NT
 from bokeh.palettes import brewer
 from bokeh.plotting import figure, show
 
@@ -25,12 +26,20 @@ from bokeh.plotting import figure, show
 """ Classes """
 
 class Spectrum:
-	def __init__(self, File, Reference=None):
-		self.Data = LoadSpectrum(File)
+	instances = []
+	def __init__(self, File=None, CalConstant=1., Reference=None):
+		""" If nothing is supplied, we'll just initialise a new 
+		instance of Spectrum without giving it any data.
+		That way I don't HAVE to load a file.
+		"""
+		self.CalibrationConstant = CalConstant
 		self.PumpWavelength = 0.
 		self.ProbeWavelength = 0.
+		if File != None:
+			self.Data = LoadSpectrum(File, CalConstant)
 		if Reference != None:                       # If we give it a logbook reference
 			self.Reference = Reference
+		Spectrum.instances.append(self)
 	def AddData(self, NewData, Name):
 		self.Data[Name] = NewData
 	def DeleteData(self, Name):
@@ -39,7 +48,7 @@ class Spectrum:
 		self.PlotLabels(Labels)                     # Initialise labels
 		try:
 			self.Labels["Title"] = self.Reference
-		except KeyError:                            # Give up if we never gave it a logbook
+		except AttributeError:                            # Give up if we never gave it a logbook
 			pass
 		PlotData(self.Data, self.Labels, Interface)
 	def PlotLabels(self, Labels=None):
@@ -47,10 +56,27 @@ class Spectrum:
 			Labels = {"X Label": "X Axis",
 					  "Y Label": "Y Axis",
 					  "Title": " ",
-					  "X Limits": [0, 100],
-					  "Y Limits": [0, 1.],
+					  "X Limits": [-np.inf, np.inf],
+					  "Y Limits": [-np.inf, np.inf],
 					 }
 		self.Labels = Labels
+	def Fit(self, Model, Interface="pyplot"):
+		""" Calls the FitModel function to fit the Data contained in this
+		instance.
+
+		Requires Model instance reference as input, and will only fit the
+		column labelled "Y Range" in data (i.e. the initially loaded data)
+
+		Sets attributes of instance corresponding to the optimised parameters,
+		the fit report, the fitted curves dataframe and covariance matrix
+		"""
+		try:
+			FittingData = FormatData(self.Data.index, self.Data["Y Range"])
+			self.Opt, self.Report, self.FitResults, self.Cov = FitModel(self.Data, Model)
+			PlotData(self.FitResults, Labels=self.Labels, Interface=Interface)
+		except KeyError:
+			print ''' No data column labelled "Y Range" '''
+			print ''' You may need to repack the data manually using FormatData. '''
 
 class Model:
 	""" Class for fitting models and functions. Ideally, I'll have a
@@ -99,6 +125,27 @@ class Model:
 ###################################################################################################
 
 """ Formatting and Fitting """
+
+def ConvertSpeedDistribution(DataFrame, Mass, Units="cm"):
+	""" Function to convert a data frame of speed distribution 
+	into a kinetic energy data frame. Requires the mass in amu 
+	as input, and returns the kinetic energy dataframe with the
+	index as the KER, and "Y Range" as P(E).
+	"""
+	if Units == "cm":        # 1/cm
+		Conversion = 83.59
+	if Units == "kJ":        # kJ/mol
+		Conversion = 1.
+	if Units == "eV":        # eV
+		Conversion = .0103636
+	NRows = len(DataFrame.index)
+	KER = np.zeros((NRows), dtype=float)
+	PE = np.zeros((NRows), dtype=float)
+	for index in range(NRows):
+		KER[index] = ((DataFrame.index[index]**2) * Mass / 2000) * Conversion
+		PE[index] = DataFrame["Y Range"][index] / (Mass * DataFrame.index[index])
+		KERDataFrame = pd.DataFrame(data=PE, index=KER, columns=["Y Range"])
+	return KERDataFrame
 
 def FormatData(X, Y):
 	""" Function to format data into a pandas data frame for
@@ -168,8 +215,8 @@ def ConvolveArrays(A, B, X=None):
 	"""
 	BinSize = len(A)
 	ConvolutionResult = signal.fftconvolve(A, B, mode="full")
-	ReshapedConvolution = np.resize(ConvolutionResult, BinSize)
-	return ReshapedConvolution                    # Return same length as input X
+	ReshapedConvolution = np.resize(ConvolutionResult, BinSize)       # This forces array back to same dimensions
+	return ReshapedConvolution                                        # Return same length as input X
 
 ###################################################################################################
 
@@ -182,7 +229,7 @@ def UnpackDict(**args):
 	"""
 	print args
 
-def LoadSpectrum(File):
+def LoadSpectrum(File, CalConstant=1.):
 	""" Function for generating a pandas dataframe from a csv,
 	involves smart sniffing of delimiter, and returns a dataframe where
 	the index is the X Range of the spectrum.
@@ -193,6 +240,7 @@ def LoadSpectrum(File):
 	DataFrame = pd.read_csv(File, delimiter=Delimiter,
 					 header=None, names=["Y Range"],
 					 index_col=0)     							  # read file from csv
+	DataFrame.set_index(DataFrame.index * CalConstant, inplace=True) # Modify index
 	DataFrame = DataFrame.dropna(axis=0)                          # removes all NaN values
 	return DataFrame
 

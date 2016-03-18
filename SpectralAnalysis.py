@@ -10,8 +10,6 @@ matplotlib.style.use('ggplot')
 from scipy import constants
 from scipy import signal
 from scipy.optimize import curve_fit
-from scipy import interpolate
-import NotebookTools as NT
 from bokeh.palettes import brewer
 from bokeh.plotting import figure, show
 
@@ -80,7 +78,7 @@ class Spectrum:
 		"""
 		try:
 			FittingData = FormatData(self.Data.index, self.Data["Y Range"])
-			self.Opt, self.Report, self.FitResults, self.Cov = FitModel(self.Data, Model)
+			self.Opt, self.Report, self.FitResults, self.Cov = FitModel(FittingData, Model)
 			PlotData(self.FitResults, Labels=self.Labels, Interface=Interface)
 		except KeyError:
 			print ''' No data column labelled "Y Range" '''

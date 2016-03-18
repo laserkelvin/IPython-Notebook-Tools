@@ -1,5 +1,6 @@
 #!/bin/python
 
+from collections import OrderedDict
 import numpy as np
 import pandas as pd
 import NotebookTools as NT
@@ -60,6 +61,13 @@ class Spectrum:
 					  "Y Limits": [-np.inf, np.inf],
 					 }
 		self.Labels = Labels
+	def ExportData(self):
+		try:
+			FilePath = self.Reference + "_export.csv"
+		except AttributeError:
+			FilePath = raw_input(" No reference found, please specify file.")
+		self.Data.to_csv(FilePath, header=False)
+		print " File saved to:\t" + FilePath
 	def Fit(self, Model, Interface="pyplot"):
 		""" Calls the FitModel function to fit the Data contained in this
 		instance.
@@ -99,7 +107,7 @@ class Model:
 		as well as the boundary conditions
 		"""
 		self.Function = ObjectiveFunction
-		self.Variables = dict.fromkeys(ObjectiveFunction.__code__.co_varnames)
+		self.Variables = OrderedDict.fromkeys(ObjectiveFunction.__code__.co_varnames)
 		try:
 			del self.Variables["x"]                  # X keeps getting picked up, get rid of it
 		except KeyError:
@@ -109,14 +117,16 @@ class Model:
 		print " Initialised variable dictionary:"
 		print self.Variables
 	def SetVariables(self, Variables):
-		self.Variables = Variables
-		print " Variables set to:\t" + str(self.Variables)
+		self.Variables = UpdateDictionary(self.Variables, Variables)
+		print " Variables set to:"
+		print str(self.Variables)
 	def SetBounds(self, Bounds):
 		""" Method for setting the boundary conditions for curve_fit,
 		requires input as 2-tuple list ([], [])
 		"""
 		self.BoundaryConditions = Bounds
-		print " Boundary conditions set to:\t" + str(self.BoundaryConditions)
+		print " Boundary conditions set to:" 
+		print str(self.BoundaryConditions)
 	def ResetAttributes(self):
 		""" Wipes the variable and boundary conditions
 		"""
@@ -124,7 +134,7 @@ class Model:
 
 ###################################################################################################
 
-""" Formatting and Fitting """
+""" Data formatting and comprehension """
 
 def ConvertSpeedDistribution(DataFrame, Mass, Units="cm"):
 	""" Function to convert a data frame of speed distribution 
@@ -149,11 +159,39 @@ def NormaliseColumn(DataFrame, Column="Y Range"):
 	"""
 	DataFrame[Column] = DataFrame[Column] / np.max(DataFrame[Column])
 
+def Dict2List(Dictionary):
+	List = [Dictionary[Item] for Item in Dictionary]
+	return List
+
+def UnpackDict(**args):
+	""" I don't know if there's a better way of doing this,
+	but I wrote this to upack a dictionary so we can parse 
+	a class dictionary and unpack it into curve_fit
+	"""
+	print args	
+
 def FormatData(X, Y):
 	""" Function to format data into a pandas data frame for
 	fitting. In case I'm too lazy to set it up myself.
 	"""
 	return pd.DataFrame(data=Y, columns=["Y Range"], index=X)
+
+def UpdateDictionary(OldDictionary, NewValues):
+	""" Will loop over keys in new dictionary and set
+	them to the old dictionary
+	"""
+	for Key in NewValues:
+		OldDictionary[Key] = NewValues[Key]
+	return OldDictionary
+
+def ConvertOrderedDict(Dictionary):
+	Keys = [Key for Key in Dictionary]
+	Items = [Dictionary[Key] for Key in Dictionary]
+	return OrderedDict(zip(Keys, Items))
+
+###################################################################################################
+
+""" Fitting function """
 
 def FitModel(DataFrame, Model):
 	""" Uses an instance of the Model class to fit data contained
@@ -167,20 +205,24 @@ def FitModel(DataFrame, Model):
 	the fitted curves for easy plotting, and the covariance matrix.
 	"""
 	print " Curve fitting with:\t" + Model.FunctionName
+	if type(Model.BoundaryConditions) == "dict":
+		Bounds = (Dict2List(Model.BoundaryConditions[0]), Dict2List(Model.BoundaryConditions[1]))
+	else:
+		Bounds = Model.BoundaryConditions
 	print " Boundary Conditions:"
-	print str(Model.BoundaryConditions)
+	print str(Bounds)
 	print " Initial parameters:"
 	OptimisedParameters, CovarianceMatrix = curve_fit(Model.Function,
-														  DataFrame.index,
-														  DataFrame["Y Range"], 
-														  UnpackDict(**Model.Variables),
-														  bounds=Model.BoundaryConditions)
+												      DataFrame.index,
+													  DataFrame["Y Range"], 
+													  UnpackDict(**Model.Variables),
+													  bounds=Bounds)
 	ParameterReport = pd.DataFrame(data=OptimisedParameters,
-			                           index=Model.Variables.keys())
+			                       index=Model.Variables.keys())
 	ModelFit = Model.Function(DataFrame.index, *OptimisedParameters)
 	FittedCurves = pd.DataFrame(data=zip(DataFrame["Y Range"], ModelFit),
-			                        columns=["Data", "Model Fit"],
-			                        index=DataFrame.index)
+			                        	 columns=["Data", "Model Fit"],
+			                         	 index=DataFrame.index)
 	print " ------------------------------------------------------"
 	print " Parameter Report:"
 	print ParameterReport
@@ -223,13 +265,6 @@ def ConvolveArrays(A, B, X=None):
 ###################################################################################################
 
 """ File I/O and plotting functions """
-
-def UnpackDict(**args):
-	""" I don't know if there's a better way of doing this,
-	but I wrote this to upack a dictionary so we can parse 
-	a class dictionary and unpack it into curve_fit
-	"""
-	print args
 
 def LoadSpectrum(File, CalConstant=1.):
 	""" Function for generating a pandas dataframe from a csv,
@@ -281,12 +316,13 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 				Title = Labels["Title"]
 				XRange = Labels["X Limits"]
 				YRange = Labels["Y Limits"]
+				plot = figure(width=500, height=400,                        # set up the labels
+				          	  x_axis_label=XLabel, y_axis_label=YLabel,
+				          	  title=Title,
+				          	  x_range=XRange, y_range=YRange)
 			except KeyError:
+				print " Not using labels"
 				pass
-			plot = figure(width=500, height=400,                        # set up the labels
-				          x_axis_label=XLabel, y_axis_label=YLabel,
-				          title=Title,
-				          x_range=XRange, y_range=YRange)
 		else:
 			plot = figure(width=500, height=400)                        # if we have no labels
 		for Data in enumerate(DataFrame):

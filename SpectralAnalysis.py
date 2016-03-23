@@ -357,9 +357,9 @@ def GenerateJComb(DataFrame, TransitionEnergies, Offset=1.3, Teeth=0.2, SelectJ=
 	# Find the indices closest to where we can put our comb teeth on
 	#Indices = [NT.find_nearest(DataFrame.index, Energy) for Energy in TransitionEnergies if TransitionEnergies[Energy] % SelectJ == 0]
 	Indices = []
-	for Energy in enumerate(TransitionEnergies):
-		if Energy[0] % SelectJ == 0:
-			Indices.append(NT.find_nearest(DataFrame.index, Energy[1]))
+	for index, Energy in enumerate(TransitionEnergies):
+		if index % SelectJ == 0:
+			Indices.append(NT.find_nearest(DataFrame.index, Energy))
 	Comb = [Offset for value in DataFrame.index]
 	print " Adding\t" + str(len(Indices)) + "\t teeth to the comb."
 	for index in Indices:
@@ -388,9 +388,9 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 				plt.ylim(Labels["Y Limits"])
 			except KeyError:                    # Will ignore whatever isn't given in dictionary
 				pass
-		for Data in enumerate(DataFrame):
-			plt.plot(DataFrame.index, DataFrame[Data[1]],           # Plots with direct reference
-			         color=Colours[Data[0]], label=Headers[Data[0]])     # Aesthetics with index
+		for index, Data in enumerate(DataFrame):
+			plt.plot(DataFrame.index, DataFrame[Data],           # Plots with direct reference
+			         color=Colours[index], label=Headers[index])     # Aesthetics with index
 		plt.legend(ncol=2, loc=9)
 		plt.show()
 	elif Interface == "bokeh":                                # Use bokeh library
@@ -402,7 +402,7 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 				Title = Labels["Title"]
 				XRange = Labels["X Limits"]
 				YRange = Labels["Y Limits"]
-				plot = figure(width=500, height=400,                        # set up the labels
+				plot = figure(width=700, height=400,                        # set up the labels
 				          	  x_axis_label=XLabel, y_axis_label=YLabel,
 				          	  title=Title, tools=tools,
 				          	  x_range=XRange, y_range=YRange)
@@ -410,9 +410,10 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 				print " Not using labels"
 				pass
 		else:
-			plot = figure(width=500, height=400, tools=tools)               # if we have no labels
-		for Data in enumerate(DataFrame):
-			plot.line(x=DataFrame.index, y=DataFrame[Data[1]],
-				      line_width=2, color=Colours[Data[0]],
-				      legend=Headers[Data[0]])
+			plot = figure(width=700, height=400, tools=tools)               # if we have no labels
+		plot.background_fill_color="gray"
+		for index, Data in enumerate(DataFrame):
+			plot.line(x=DataFrame.index, y=DataFrame[Data],
+				      line_width=2, color=Colours[index],
+				      legend=Headers[index])
 		show(plot)

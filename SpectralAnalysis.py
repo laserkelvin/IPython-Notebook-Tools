@@ -1,6 +1,7 @@
 #!/bin/python
 
 from collections import OrderedDict
+import inspect
 import numpy as np
 import pandas as pd
 import NotebookTools as NT
@@ -8,6 +9,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.style.use('ggplot')
 from scipy import constants
+import peakutils
+from scipy import fftpack
 from scipy import signal
 from scipy.optimize import curve_fit
 from bokeh.palettes import brewer
@@ -22,6 +25,27 @@ from bokeh.plotting import figure, show
 
 ###################################################################################################
 
+""" Constants and small persistent dictionaries """
+
+""" Values for oxygen calibration as a dictionary
+OxygenKER is the total translational energy release for the molecule,
+while OxygenAtomSpeed is self explanatory.
+ """
+OxygenKER = {"3P": 0.21585*2,
+             "5P": 0.33985*2,
+             "3S": 0.95*2,
+             "5S": 1.14*2}
+
+OxygenAtomSpeed = {"3P": 1141.016103985279,
+                   "5P": 1431.7242621001822,
+                   "3S": 2393.7431587974975,
+                   "5S": 2622.2142498941203}
+
+# Unit conversion, kB from J/mol to 1/(cm mol)
+kcm = constants.physical_constants["Boltzmann constant in inverse meters per kelvin"][0] / 100.0
+
+###################################################################################################
+
 """ Classes """
 
 class Spectrum:
@@ -32,6 +56,7 @@ class Spectrum:
 		That way I don't HAVE to load a file.
 		"""
 		self.CalibrationConstant = CalConstant
+		self.CalibratedWavelengths = [0., 0.,]
 		self.PumpWavelength = 0.
 		self.ProbeWavelength = 0.
 		if File != None:
@@ -39,6 +64,10 @@ class Spectrum:
 		if Reference != None:                       # If we give it a logbook reference
 			self.Reference = Reference
 		Spectrum.instances.append(self)
+	def CalibrateWavelengths(self, Wavelengths):
+		NData = len(self.Data.index)
+		NewAxis = np.linspace(num=NData, *Wavelengths)
+		self.Data.index = NewAxis
 	def AddData(self, NewData, Name):
 		self.Data[Name] = NewData
 	def DeleteData(self, Name):
@@ -55,8 +84,8 @@ class Spectrum:
 			Labels = {"X Label": "X Axis",
 					  "Y Label": "Y Axis",
 					  "Title": " ",
-					  "X Limits": [-np.inf, np.inf],
-					  "Y Limits": [-np.inf, np.inf],
+					  "X Limits": [min(self.Data.index), max(self.Data.index)],
+					  "Y Limits": [min(self.Data["Y Range"]), max(self.Data["Y Range"])],
 					 }
 		self.Labels = Labels
 	def ExportData(self):
@@ -83,6 +112,15 @@ class Spectrum:
 		except KeyError:
 			print ''' No data column labelled "Y Range" '''
 			print ''' You may need to repack the data manually using FormatData. '''
+	def DetectPeaks(self, Threshold=0.3, MinimumDistance=30.):
+		""" Calls the peak finding function from peakutils that will
+		sniff up peaks in a spectrum. This class method will then
+		store that information as an attribute
+		"""
+		PeakIndices = PeakFinding(self.Data, Threshold, MinimumDistance)
+		self.Peaks = {"Peak Indices": PeakIndices,
+		              "Threshold": Threshold,
+		              "Minimum Distance": MinimumDistance}
 
 class Model:
 	""" Class for fitting models and functions. Ideally, I'll have a
@@ -105,7 +143,7 @@ class Model:
 		as well as the boundary conditions
 		"""
 		self.Function = ObjectiveFunction
-		self.Variables = OrderedDict.fromkeys(ObjectiveFunction.__code__.co_varnames)
+		self.Variables = OrderedDict.fromkeys(inspect.getargspec(ObjectiveFunction)[0])
 		try:
 			del self.Variables["x"]                  # X keeps getting picked up, get rid of it
 		except KeyError:
@@ -189,7 +227,7 @@ def ConvertOrderedDict(Dictionary):
 
 ###################################################################################################
 
-""" Fitting function """
+""" Fitting functions """
 
 def FitModel(DataFrame, Model):
 	""" Uses an instance of the Model class to fit data contained
@@ -214,7 +252,8 @@ def FitModel(DataFrame, Model):
 												      DataFrame.index,
 													  DataFrame["Y Range"], 
 													  UnpackDict(**Model.Variables),
-													  bounds=Bounds)
+													  bounds=Bounds,
+													  method="trf")
 	ParameterReport = pd.DataFrame(data=OptimisedParameters,
 			                       index=Model.Variables.keys())
 	ModelFit = Model.Function(DataFrame.index, *OptimisedParameters)
@@ -225,6 +264,20 @@ def FitModel(DataFrame, Model):
 	print " Parameter Report:"
 	print ParameterReport
 	return OptimisedParameters, ParameterReport, FittedCurves, CovarianceMatrix
+
+def PeakFinding(DataFrame, Threshold=0.3, MinimumDistance=30.):
+	""" Routine that will sniff out peaks in a spectrum, and fit them with Gaussian functions
+	I have no idea how well this will work, but it feels like it's gonna get pretty
+	complicated pretty quickly
+	"""
+	PeakIndices = peakutils.indexes(DataFrame["Y Range"], thres=Threshold, min_dist=MinimumDistance)
+	NPeaks = len(PeakIndices)
+	print " Found \t" + str(NPeaks) + "\t peaks."
+	StickSpectrum = np.zeros((len(DataFrame["Y Range"])), dtype=float)
+	for Index in PeakIndices:
+		StickSpectrum[Index] = 1.
+	DataFrame["Stick Spectrum"] = StickSpectrum
+	return PeakIndices
 
 ###################################################################################################
 
@@ -238,9 +291,6 @@ def BaseGaussian(x, x0):
 def GaussianFunction(x, Amplitude, Centre, Width):
 	return Amplitude * (1 / (Width * np.sqrt(2 * np.pi))) * np.exp(-np.square(x - Centre) / (2 * Width**2))
 
-# Unit conversion, kB from J/mol to 1/(cm mol)
-kcm = constants.physical_constants["Boltzmann constant in inverse meters per kelvin"][0] / 100.0
-
 def BoltzmannFunction(x, Amplitude, Temperature):
 	#return Amplitude * np.exp(1) / (kcm * Temperature) * x * np.exp(- x / (kcm * Temperature))
 	return Amplitude * np.sqrt(1 / (2 * np.pi * kcm * Temperature)**3) * 4 * np.pi * x * np.exp(-(x) / (kcm * Temperature))
@@ -248,17 +298,30 @@ def BoltzmannFunction(x, Amplitude, Temperature):
 def Linear(x, Gradient, Offset):
 	return x * Gradient + Offset
 
-def ConvolveArrays(A, B, X=None):
-	""" Special function that will return the convolution of two arrays 
-	in the same length, rather than 2N - 1
+def ConvolveArrays(A, B, method="new"):
+	""" Function I wrote to compute the convolution of two arrays.
+	The new method is written as a manual convolution calculated by
+	taking the inverse Fourier transform of the Fourier product of the
+	two arrays.
+
+	Returns only the real values of the transform.
+
+	Old function uses the scipy function, which I had issues with the
+	length of array returned.
 
 	Requires input of two same-dimension arrays A and B, and an optional
 	1-D array that holds the X dimensions.
 	"""
-	BinSize = len(A)
-	ConvolutionResult = signal.fftconvolve(A, B, mode="full")
-	ReshapedConvolution = np.resize(ConvolutionResult, BinSize)       # This forces array back to same dimensions
-	return ReshapedConvolution                                        # Return same length as input X
+	if method == "old":
+		BinSize = len(A)
+		ConvolutionResult = signal.fftconvolve(A, B, mode="full")
+		ReshapedConvolution = ConvolutionResult[0:BinSize]
+		return ReshapedConvolution                                 # Return same length as input X
+	elif method == "new":
+		FTA = fftpack.fft(A)
+		FTB = fftpack.fft(B)
+		FTProduct = FTA * FTB
+		return np.real(fftpack.ifft(FTProduct))
 
 ###################################################################################################
 
@@ -278,6 +341,30 @@ def LoadSpectrum(File, CalConstant=1.):
 	DataFrame.set_index(DataFrame.index * CalConstant, inplace=True) # Modify index
 	DataFrame = DataFrame.dropna(axis=0)                          # removes all NaN values
 	return DataFrame
+
+def GenerateJComb(DataFrame, TransitionEnergies, Offset=1.3, Teeth=0.2, SelectJ=10):
+	""" Function for generating a rotational comb spectrum as an annotation
+	Not elegant, but it works!
+	The required input:
+	DataFrame - pandas dataframe containing X axis of target spectrum
+	TransitionEnergies - A list of transition energies in some (e.g. J) order
+	Offset - The height of the comb 
+	Teeth - The length of the comb's teeth (lol)
+	SelectJ - Integer for selecting out multiples of J so it's not insane
+
+	Sets the input dataframe key "Comb" with the comb spectrum
+	"""
+	# Find the indices closest to where we can put our comb teeth on
+	#Indices = [NT.find_nearest(DataFrame.index, Energy) for Energy in TransitionEnergies if TransitionEnergies[Energy] % SelectJ == 0]
+	Indices = []
+	for Energy in enumerate(TransitionEnergies):
+		if Energy[0] % SelectJ == 0:
+			Indices.append(NT.find_nearest(DataFrame.index, Energy[1]))
+	Comb = [Offset for value in DataFrame.index]
+	print " Adding\t" + str(len(Indices)) + "\t teeth to the comb."
+	for index in Indices:
+		Comb[index] = Comb[index] - Teeth
+	DataFrame["Comb"] = Comb
 
 def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 	""" A themed data plotting routine. Will use either matplotlib or
@@ -307,6 +394,7 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 		plt.legend(ncol=2, loc=9)
 		plt.show()
 	elif Interface == "bokeh":                                # Use bokeh library
+		tools = "pan, wheel_zoom, box_zoom, reset, resize, hover"
 		if Labels != None:
 			try:                                              # Unpack whatever we can from Labels
 				XLabel = Labels["X Label"]
@@ -316,13 +404,13 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 				YRange = Labels["Y Limits"]
 				plot = figure(width=500, height=400,                        # set up the labels
 				          	  x_axis_label=XLabel, y_axis_label=YLabel,
-				          	  title=Title,
+				          	  title=Title, tools=tools,
 				          	  x_range=XRange, y_range=YRange)
 			except KeyError:
 				print " Not using labels"
 				pass
 		else:
-			plot = figure(width=500, height=400)                        # if we have no labels
+			plot = figure(width=500, height=400, tools=tools)               # if we have no labels
 		for Data in enumerate(DataFrame):
 			plot.line(x=DataFrame.index, y=DataFrame[Data[1]],
 				      line_width=2, color=Colours[Data[0]],

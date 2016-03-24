@@ -88,11 +88,25 @@ class Spectrum:
 					  "Y Limits": [min(self.Data["Y Range"]), max(self.Data["Y Range"])],
 					 }
 		self.Labels = Labels
-	def ExportData(self):
-		try:
-			FilePath = self.Reference + "_export.csv"
-		except AttributeError:
-			FilePath = raw_input(" No reference found, please specify file.")
+	def ExportData(self, CustomSuffix=False, Suffix=None):
+		if CustomSuffix == False:
+			try:
+				FilePath = self.Reference + "_export.csv"
+			except AttributeError:
+				FilePath = raw_input(" No reference found, please specify file.")
+		elif CustomSuffix == True and Suffix == None:
+			try:
+				Suffix = raw_input("Please enter a suffix to be used for export, e.g. _export")
+				FilePath = self.Reference + Suffix
+			except AttributeError:
+				Reference = raw_input("No reference found, please provide one.")
+				FilePath = Reference + Suffix
+		elif Suffix != None:
+			try:
+				FilePath = self.Reference + Suffix
+			except AttributeError:
+				Reference = raw_input("No reference found, please provide one.")
+				FilePath = Reference + Suffix
 		self.Data.to_csv(FilePath, header=False)
 		print " File saved to:\t" + FilePath
 	def Fit(self, Model, Interface="pyplot"):
@@ -188,6 +202,7 @@ def ConvertSpeedDistribution(DataFrame, Mass, Units="cm"):
 	PE = DataFrame["Y Range"].values / (Mass / 1000. * DataFrame.index)
 	KERDataFrame = pd.DataFrame(data=PE, index=KER, columns=["Y Range"])
 	KERDataFrame = KERDataFrame.dropna(axis=0)
+	#for index, value in enumerate(KERDataFrame)
 	return KERDataFrame
 
 def NormaliseColumn(DataFrame, Column="Y Range"):
@@ -389,7 +404,10 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 			except KeyError:                    # Will ignore whatever isn't given in dictionary
 				pass
 		for index, Data in enumerate(DataFrame):
+			plt.scatter(DataFrame.index, DataFrame[Data],           # Plots with direct reference
+			         color=Colours[index])     # Aesthetics with index
 			plt.plot(DataFrame.index, DataFrame[Data],           # Plots with direct reference
+				     antialiased=True,
 			         color=Colours[index], label=Headers[index])     # Aesthetics with index
 		plt.legend(ncol=2, loc=9)
 		plt.show()
@@ -413,6 +431,9 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 			plot = figure(width=700, height=400, tools=tools)               # if we have no labels
 		plot.background_fill_color="gray"
 		for index, Data in enumerate(DataFrame):
+			plot.scatter(x=DataFrame.index, y=DataFrame[Data],
+				      line_width=2, color=Colours[index],
+				      legend=Headers[index])
 			plot.line(x=DataFrame.index, y=DataFrame[Data],
 				      line_width=2, color=Colours[index],
 				      legend=Headers[index])

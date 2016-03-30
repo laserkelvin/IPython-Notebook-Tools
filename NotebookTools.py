@@ -114,26 +114,58 @@ def amu2kg(Mass):
     """
     return (Mass / constants.Avogadro) / 1000
 
+""" Mass in the following functions is specified in kg/mol """
 # function to convert speed into kinetic energy, using data frames
 def Speed2KER(Data, Mass):
+    """ Convert metres per second to kinetic energy
+        in wavenumbers.
+    """
     KER = np.zeros(len(Data[0]), dtype=float)
-    for index in range(len(Data[0])):
-        KER[index] = ((Data[0][index]**2) * Mass / 2000) * 83.59
+    for index, energy in enumerate(Data[0]):
+        KER[index] = ((energy**2) * Mass / 2000) * 83.59
     return KER
+
+def KER2Speed(Data, Mass):
+    """ Convert kinetic energy in 1/cm to metres per second.
+    """
+    Speed = np.zeros(len(Data[0]), dtype=float)
+    for index, energy in enumerate(Data[0]):
+        Speed[index] = np.sqrt(((energy / 83.59) * 2000.) / Mass)
+    return Speed
 
 # function to convert P(s) into P(E), using Pandas data frames
 def PS2PE(Data, Mass):
     PE = np.zeros(len(Data[1]), dtype=float)
-    for index in range(len(Data[0])):
-        PE[index] = Data[1][index] / (Mass * Data[0][index])
+    for index, probability in enumerate(Data[1]):
+        PE[index] = probability / (Mass * Data[0][index])
     return PE
+
+def PE2PS(Data, Mass):
+    """ Convert translational energy probability
+        to speed probability.
+    """
+    PS = np.zeros(len(Data[1]), dtype=float)
+    for index, probability in enumerate(Data[1]):
+        PS[index] = probability * (Mass * Data[0][index])
+    return PS
 
 # Function to convert a speed distribution loaded with Pandas dataframe into a
 # kinetic energy distribution
 def ConvertSpeedToKER(Data, Mass):
     KER = Speed2KER(Data, Mass)
     PE = PS2PE(Data, Mass)
-    return pd.DataFrame(data = zip(KER, PE))
+    return pd.DataFrame(data = PE,
+                        index = KER,
+                        columns=["PE"])
+
+# Function to convert a translational energy distribution 
+# loaded with Pandas dataframe into a speed distribution
+def ConvertKERToSpeed(Data, Mass):
+    Speed = KER2Speed(Data, Mass)
+    PS = PE2PS(Data, Mass)
+    return pd.DataFrame(data = PS,
+                        index = Speed,
+                        columns=["PS"])
 
 ################### General analysis functions ##################
 

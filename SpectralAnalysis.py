@@ -12,6 +12,7 @@ from scipy import constants
 import peakutils
 from scipy import fftpack
 from scipy import signal
+from scipy import interpolate
 from scipy.optimize import curve_fit
 from bokeh.palettes import brewer
 from bokeh.plotting import figure, show
@@ -65,6 +66,10 @@ class Spectrum:
 			self.Reference = Reference
 		Spectrum.instances.append(self)
 	def CalibrateWavelengths(self, Wavelengths):
+		""" Wavelengths given in as 2-tuple list
+		and sets the Dataframe index to the calibrated
+		wavelengths
+		"""
 		NData = len(self.Data.index)
 		NewAxis = np.linspace(num=NData, *Wavelengths)
 		self.Data.index = NewAxis
@@ -72,6 +77,20 @@ class Spectrum:
 		self.Data[Name] = NewData
 	def DeleteData(self, Name):
 		del self.Data[Name]
+	def ReadBogScan(self, File):
+		""" Special function for reading data files from
+		BogScan
+		"""
+		DataFrame = pd.read_csv(File, delimiter="\t", header=None)
+		if DataFrame[1].sum > 0. == True:                   # If we've got calibrated wavelengths
+			X = DataFrame.as_matrix([1])
+			print " Using calibrated wavelengths"
+		else:
+			X = DataFrame.as_matrix([0])
+			print " Using bogscan wavelengths"
+		Y = -DataFrame.as_matrix([2])
+		NewDataFrame = FormatData(X, Y)
+		self.Data = NewDataFrame
 	def PlotAll(self, Labels=None, Interface="pyplot"):
 		self.PlotLabels(Labels)                     # Initialise labels
 		try:
@@ -226,6 +245,20 @@ def FormatData(X, Y):
 	fitting. In case I'm too lazy to set it up myself.
 	"""
 	return pd.DataFrame(data=Y, columns=["Y Range"], index=X)
+
+def SubtractSpectra(A, B):
+	""" Takes input as two instances of Spectrum class, and does
+	a nifty subtraction of the spectra A - B by interpolating
+	B into the X axis range of A
+	"""
+	XA = A.Data.index
+	YA = A.Data.as_matrix(["Y Range"])
+	XB = B.Data.index
+	YB = B.Data.as_matrix(["Y Range"])
+	Interpolation = interpolate.interp1d(XB, YB)
+	RecastYB = Interpolation(XA)
+	Subtraction = YA - RecastYB
+	return FormatData(XA, Subtraction)
 
 def UpdateDictionary(OldDictionary, NewValues):
 	""" Will loop over keys in new dictionary and set

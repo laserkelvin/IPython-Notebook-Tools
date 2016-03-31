@@ -128,6 +128,12 @@ class Spectrum:
 				FilePath = Reference + Suffix
 		self.Data.to_csv(FilePath, header=False)
 		print " File saved to:\t" + FilePath
+	def ExportFits(self, Suffix="_fit.csv"):
+		try:
+			self.FitResults.to_csv(self.Reference + Suffix)
+		except AttributeError:
+			Reference = raw_input(" No reference found, give me a name.")
+			self.FitResults.to_csv(Reference + Suffix)
 	def Fit(self, Model, Interface="pyplot"):
 		""" Calls the FitModel function to fit the Data contained in this
 		instance.
@@ -277,7 +283,7 @@ def ConvertOrderedDict(Dictionary):
 
 """ Fitting functions """
 
-def FitModel(DataFrame, Model):
+def FitModel(DataFrame, Model, Column="Y Range"):
 	""" Uses an instance of the Model class to fit data contained
 	in the pandas dataframe. Dataframe should have indices of the X-range
 	and column "Y Range" as the Y data to be fit to
@@ -297,17 +303,18 @@ def FitModel(DataFrame, Model):
 	print str(Bounds)
 	print " Initial parameters:"
 	OptimisedParameters, CovarianceMatrix = curve_fit(Model.Function,
-												      DataFrame.index,
-													  DataFrame["Y Range"], 
+												      np.array(DataFrame.index, dtype=float),
+													  DataFrame[Column].values, 
 													  UnpackDict(**Model.Variables),
 													  bounds=Bounds,
 													  method="trf")
 	ParameterReport = pd.DataFrame(data=OptimisedParameters,
 			                       index=Model.Variables.keys())
-	ModelFit = Model.Function(DataFrame.index, *OptimisedParameters)
-	FittedCurves = pd.DataFrame(data=zip(DataFrame["Y Range"], ModelFit),
+	ModelFit = Model.Function(np.array(DataFrame.index, dtype=float),
+							  *OptimisedParameters)
+	FittedCurves = pd.DataFrame(data=zip(DataFrame[Column], ModelFit),
 			                        	 columns=["Data", "Model Fit"],
-			                         	 index=DataFrame.index)
+			                         	 index=np.array(DataFrame.index, dtype=float))
 	print " ------------------------------------------------------"
 	print " Parameter Report:"
 	print ParameterReport

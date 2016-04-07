@@ -252,6 +252,22 @@ def FormatData(X, Y):
 	"""
 	return pd.DataFrame(data=Y, columns=["Y Range"], index=X)
 
+def DistributionStatistics(DataFrame):
+	""" Calculate the numerical average for each column
+	    of a dataframe
+	"""
+	Dictionary = {}
+	X = np.array(DataFrame.index)
+	for Key in DataFrame.keys():
+		Y = np.array(DataFrame[Key])
+		Y = Y / np.trapz(Y, X)                      # normalise to integral
+		Expec = np.trapz(np.multiply(Y, X), X)      # expec = f(x) x dx
+		Squares = np.multiply((X - Expec)**2, Y)
+		StdDev = np.sqrt(np.trapz(Squares, X) / np.trapz(Y, X))
+		Dictionary[Key] = {"Expec": Expec,
+		                   "StdDev": StdDev}
+	return Dictionary
+
 def SubtractSpectra(A, B):
 	""" Takes input as two instances of Spectrum class, and does
 	a nifty subtraction of the spectra A - B by interpolating

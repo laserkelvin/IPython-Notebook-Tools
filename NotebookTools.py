@@ -7,25 +7,11 @@
 import pandas as pd
 import numpy as np
 import csv
+import cPickle as pickle
 from scipy import constants
 from scipy.signal import savgol_filter
 
 ################## General notebook functions ####################
-
-# Because I'm a lazy and forgetful SOB write a function to read with pandas
-def PandaRead(file):
-    Delimiter = DetectDelimiter(file)
-    df = pd.read_csv(file,delimiter=Delimiter,header=None)
-    df = df.dropna(axis=0)           # removes all NaN values
-    return df
-
-def DetectDelimiter(File):
-    sniffer = csv.Sniffer()
-    f = open(File, "r")                   # open file and read the first line
-    fc = f.readline()
-    f.close()
-    line = sniffer.sniff(fc)
-    return line.delimiter
 
 def ConvertUnit(Initial, Target):
     """ Convert units by specify what the initial unit is
@@ -107,6 +93,52 @@ def ConvertUnit(Initial, Target):
                                 1.])
     return UnitConversions[Initial][Target][0]
 
+############################ File I/O ############################
+
+# Because I'm a lazy and forgetful SOB write a function to read with pandas
+def PandaRead(file):
+    Delimiter = DetectDelimiter(file)
+    df = pd.read_csv(file,delimiter=Delimiter,header=None)
+    df = df.dropna(axis=0)           # removes all NaN values
+    return df
+
+def DetectDelimiter(File):
+    """ Routine to see what delimiter the file has
+    """
+    sniffer = csv.Sniffer()
+    f = open(File, "r")                   # open file and read the first line
+    fc = f.readline()
+    f.close()
+    line = sniffer.sniff(fc)
+    return line.delimiter
+
+def DetectHeader(File):
+    """ Routine to detect whether or not there are headers
+        in the csv file.
+    """
+    with open(File, "rU") as f:        # "rU" opens in universal newline mode!
+        return csv.Sniffer().has_header(f.read(1024))
+
+def SaveObject(Object, Database):
+    """ Function for saving class structure data
+        to a database using pickle
+
+        The way to use this would be to have a dictionary
+        with all of the instances in my notebook, with the
+        dictionary keys as the references
+    """
+    with open(Database, "wb") as db:
+        pickle.dump(Object, db, pickle.HIGHEST_PROTOCOL)
+    db.close()
+
+def LoadObject(Database):
+    """ Function to read in a pickle database
+    """
+    with open(Database, "r") as db:
+        temp = pickle.load(db)
+    db.close()
+    return temp
+
 ################### Speed Distribution Analysis ###################
 
 def amu2kg(Mass):
@@ -114,26 +146,83 @@ def amu2kg(Mass):
     """
     return (Mass / constants.Avogadro) / 1000
 
+""" Mass in the following functions is specified in kg/mol """
 # function to convert speed into kinetic energy, using data frames
 def Speed2KER(Data, Mass):
+    """ Convert metres per second to kinetic energy
+        in wavenumbers.
+    """
     KER = np.zeros(len(Data[0]), dtype=float)
-    for index in range(len(Data[0])):
-        KER[index] = ((Data[0][index]**2) * Mass / 2000) * 83.59
+    for index, energy in enumerate(Data[0]):
+        KER[index] = ((energy**2) * Mass / 2000) * 83.59
     return KER
+
+def KER2Speed(Data, Mass):
+    """ Convert kinetic energy in 1/cm to metres per second.
+    """
+    Speed = np.zeros(len(Data[0]), dtype=float)
+    for index, energy in enumerate(Data[0]):
+        Speed[index] = np.sqrt(((energy / 83.59) * 2000.) / Mass)
+    return Speed
 
 # function to convert P(s) into P(E), using Pandas data frames
 def PS2PE(Data, Mass):
     PE = np.zeros(len(Data[1]), dtype=float)
-    for index in range(len(Data[0])):
-        PE[index] = Data[1][index] / (Mass * Data[0][index])
+    for index, probability in enumerate(Data[1]):
+        PE[index] = probability / (Mass * Data[0][index])
     return PE
+
+def PE2PS(Data, Mass):
+    """ Convert translational energy probability
+        to speed probability.
+    """
+    PS = np.zeros(len(Data[1]), dtype=float)
+    for index, probability in enumerate(Data[1]):
+        PS[index] = probability * (Mass * Data[0][index])
+    return PS
 
 # Function to convert a speed distribution loaded with Pandas dataframe into a
 # kinetic energy distribution
 def ConvertSpeedToKER(Data, Mass):
     KER = Speed2KER(Data, Mass)
     PE = PS2PE(Data, Mass)
-    return pd.DataFrame(data = zip(KER, PE))
+    return pd.DataFrame(data = PE,
+                        index = KER,
+                        columns=["PE"])
+
+# Function to convert a translational energy distribution 
+# loaded with Pandas dataframe into a speed distribution
+def ConvertKERToSpeed(Data, Mass):
+    Speed = KER2Speed(Data, Mass)
+    PS = PE2PS(Data, Mass)
+    return pd.DataFrame(data = PS,
+                        index = Speed,
+                        columns=["PS"])
+
+######################## Data List Functions ####################
+
+def InitialiseDataList():
+    return pd.DataFrame(index=["Data type",
+                                 "Pump wavelength",
+                                 "Probe wavelength",
+                                 "Background reference",
+                                 "Tags",
+                                 "Comments"])
+
+def AddDataEntry(DataList):
+    Reference = raw_input("What is the data reference?")
+    DataType = raw_input("What kind of data is \t" + Reference + "?")
+    PumpWavelength = raw_input("What was the pump wavelength?")
+    ProbeWavelength = raw_input("What was the probe wavelength?")
+    BackgroundReference = raw_input("What is the logbook reference for background data?")
+    Tags = raw_input("Tags to group the data?")
+    Comments = raw_input("Any extra comments?")
+    DataList[Reference] = [DataType,
+                           PumpWavelength, 
+                           ProbeWavelength, 
+                           BackgroundReference,
+                           Tags,
+                           Comments]
 
 ################### General analysis functions ##################
 
@@ -142,6 +231,21 @@ def SplitArray(x,index):          # For a given array, split into two based on i
     B = x[:index]
     return A, B
 
+def CheckOffDiagonal(Array):
+    """ Extract the off-diagonal elements of an array
+        and return a sorted list quickly.
+    """
+    iterator = np.nditer(Array, flags=['multi_index'])
+    Elements = []
+    while not iterator.finished:   # start the loop
+        if np.diff(iterator.multi_index) != 0:   # if the indices aren't equal
+            Elements.append(iterator[0])
+        else:
+            pass
+        iterator.iternext()        # next iteration of loop
+    Elements.sort()                # sort by size, ascending order
+    return Elements
+
 def find_nearest(array,value):    # Returns the index for the value closest to the specified
     idx = (np.abs(array-value)).argmin()
     return idx
@@ -149,7 +253,7 @@ def find_nearest(array,value):    # Returns the index for the value closest to t
 # Uses the Savitzky-Golay filter to smooth an input array Y
 def SGFilter(Y, WindowSize, Order=2, Deriv=0, Rate=1):
     if WindowSize % 2 == 1:
-        return savgol_filter(Y, WindowSize, Order, Deriv)
+        return savgol_filter(Y, int(WindowSize), Order, Deriv)
     else:
         print " WindowSize is " + str(WindowSize) + " which isn't odd!"
         print " Please specify an odd number!"

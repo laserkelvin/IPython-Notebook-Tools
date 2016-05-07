@@ -9,12 +9,15 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.style.use('ggplot')
 from scipy import constants
+import os
 import peakutils
 from scipy import fftpack
 from scipy import signal
+from scipy import interpolate
 from scipy.optimize import curve_fit
 from bokeh.palettes import brewer
 from bokeh.plotting import figure, show
+from numba import jit
 
 # SpectralAnalysis.py
 
@@ -31,15 +34,17 @@ from bokeh.plotting import figure, show
 OxygenKER is the total translational energy release for the molecule,
 while OxygenAtomSpeed is self explanatory.
  """
-OxygenKER = {"3P": 0.21585*2,
-             "5P": 0.33985*2,
-             "3S": 0.95*2,
-             "5S": 1.14*2}
+OxygenKER = OrderedDict({"3P": 0.21585*2,
+                         "5P": 0.33985*2,
+                         "3S": 0.95*2,
+                         "5S": 1.14*2}
+                       )
 
-OxygenAtomSpeed = {"3P": 1141.016103985279,
-                   "5P": 1431.7242621001822,
-                   "3S": 2393.7431587974975,
-                   "5S": 2622.2142498941203}
+OxygenAtomSpeed = OrderedDict({"3P": 1141.016103985279,
+                   		       "5P": 1431.7242621001822,
+                               "3S": 2393.7431587974975,
+                               "5S": 2622.2142498941203}
+                             )
 
 # Unit conversion, kB from J/mol to 1/(cm mol)
 kcm = constants.physical_constants["Boltzmann constant in inverse meters per kelvin"][0] / 100.0
@@ -59,12 +64,17 @@ class Spectrum:
 		self.CalibratedWavelengths = [0., 0.,]
 		self.PumpWavelength = 0.
 		self.ProbeWavelength = 0.
+		self.Comments = ""
 		if File != None:
 			self.Data = LoadSpectrum(File, CalConstant)
 		if Reference != None:                       # If we give it a logbook reference
 			self.Reference = Reference
 		Spectrum.instances.append(self)
 	def CalibrateWavelengths(self, Wavelengths):
+		""" Wavelengths given in as 2-tuple list
+		and sets the Dataframe index to the calibrated
+		wavelengths
+		"""
 		NData = len(self.Data.index)
 		NewAxis = np.linspace(num=NData, *Wavelengths)
 		self.Data.index = NewAxis
@@ -72,6 +82,20 @@ class Spectrum:
 		self.Data[Name] = NewData
 	def DeleteData(self, Name):
 		del self.Data[Name]
+	def ReadBogScan(self, File):
+		""" Special function for reading data files from
+		BogScan
+		"""
+		DataFrame = pd.read_csv(File, delimiter="\t", header=None)
+		if DataFrame[1].sum > 0. == True:                   # If we've got calibrated wavelengths
+			X = DataFrame.as_matrix([1])
+			print " Using calibrated wavelengths"
+		else:
+			X = DataFrame.as_matrix([0])
+			print " Using bogscan wavelengths"
+		Y = -DataFrame.as_matrix([2])
+		NewDataFrame = FormatData(X, Y)
+		self.Data = NewDataFrame
 	def PlotAll(self, Labels=None, Interface="pyplot"):
 		self.PlotLabels(Labels)                     # Initialise labels
 		try:
@@ -89,27 +113,38 @@ class Spectrum:
 					 }
 		self.Labels = Labels
 	def ExportData(self, CustomSuffix=False, Suffix=None):
+		try:
+			os.mkdir("DataExport")
+		except OSError:
+			pass
 		if CustomSuffix == False:
 			try:
-				FilePath = self.Reference + "_export.csv"
+				FilePath = "./DataExport/" + self.Reference + "_export.csv"
 			except AttributeError:
 				FilePath = raw_input(" No reference found, please specify file.")
 		elif CustomSuffix == True and Suffix == None:
 			try:
 				Suffix = raw_input("Please enter a suffix to be used for export, e.g. _export")
-				FilePath = self.Reference + Suffix
+				FilePath = "./DataExport/" + self.Reference + Suffix
 			except AttributeError:
 				Reference = raw_input("No reference found, please provide one.")
-				FilePath = Reference + Suffix
+				FilePath = "./DataExport/" + Reference + Suffix
 		elif Suffix != None:
 			try:
 				FilePath = self.Reference + Suffix
 			except AttributeError:
 				Reference = raw_input("No reference found, please provide one.")
-				FilePath = Reference + Suffix
+				FilePath = "./DataExport/" + Reference + Suffix
 		self.Data.to_csv(FilePath, header=False)
 		print " File saved to:\t" + FilePath
-	def Fit(self, Model, Interface="pyplot"):
+	def ExportFits(self, Suffix="_fit.csv"):
+		try:
+			self.FitResults.to_csv(self.Reference + Suffix)
+		except AttributeError:
+			Reference = raw_input(" No reference found, give me a name.")
+			self.FitResults.to_csv(Reference + Suffix)
+			print " File saved to:\t" + Reference + Suffix
+	def Fit(self, Model, Column="Y Range", Interface="pyplot", Mode="Loud"):
 		""" Calls the FitModel function to fit the Data contained in this
 		instance.
 
@@ -120,9 +155,14 @@ class Spectrum:
 		the fit report, the fitted curves dataframe and covariance matrix
 		"""
 		try:
-			FittingData = FormatData(self.Data.index, self.Data["Y Range"])
+			FittingData = FormatData(self.Data.index, np.array(self.Data[Column]))
 			self.Opt, self.Report, self.FitResults, self.Cov = FitModel(FittingData, Model)
-			PlotData(self.FitResults, Labels=self.Labels, Interface=Interface)
+			#self.Report["Errors"] = self.Cov.diagonal()
+			#self.Report.columns = ["Values", "Errors"]       # pack parameters and errors
+			if Mode == "Loud":
+				PlotData(self.FitResults, Labels=self.Labels, Interface=Interface)
+			elif Mode == "Quiet":
+				pass
 		except KeyError:
 			print ''' No data column labelled "Y Range" '''
 			print ''' You may need to repack the data manually using FormatData. '''
@@ -135,6 +175,11 @@ class Spectrum:
 		self.Peaks = {"Peak Indices": PeakIndices,
 		              "Threshold": Threshold,
 		              "Minimum Distance": MinimumDistance}
+	def Smooth(self, WindowSize=5, Column="Y Range"):
+		""" Smooths the experimental data using a Svatizky-Golay filter
+		    with the specified window size.
+		"""
+		self.Data["Smoothed"] = np.array(NT.SGFilter(self.Data[Column], WindowSize))
 
 class Model:
 	""" Class for fitting models and functions. Ideally, I'll have a
@@ -221,11 +266,54 @@ def UnpackDict(**args):
 	"""
 	print args	
 
+def ExtractFunctionParameters(Parameters, Report):
+	""" Function for getting the parameters from a fit report 
+	    produced by my fitting function. 
+
+	    Takes a list of
+	    strings with names of the variables you want, and
+	    extracts them from the report
+	"""
+	VariableDictionary = OrderedDict()
+	for Variable in Parameters:
+		VariableDictionary[Variable] = Report["Values"][Variable]
+	return VariableDictionary
+
 def FormatData(X, Y):
 	""" Function to format data into a pandas data frame for
 	fitting. In case I'm too lazy to set it up myself.
 	"""
 	return pd.DataFrame(data=Y, columns=["Y Range"], index=X)
+
+def DistributionStatistics(DataFrame):
+	""" Calculate the numerical average for each column
+	    of a dataframe
+	"""
+	Dictionary = {}
+	X = np.array(DataFrame.index)
+	for Key in DataFrame.keys():
+		Y = np.array(DataFrame[Key])
+		Y = Y / np.trapz(Y, X)                      # normalise to integral
+		Expec = np.trapz(np.multiply(Y, X), X)      # expec = f(x) x dx
+		Squares = np.multiply((X - Expec)**2, Y)
+		StdDev = np.sqrt(np.trapz(Squares, X) / np.trapz(Y, X))
+		Dictionary[Key] = {"Expec": Expec,
+		                   "StdDev": StdDev}
+	return Dictionary
+
+def SubtractSpectra(A, B):
+	""" Takes input as two instances of Spectrum class, and does
+	a nifty subtraction of the spectra A - B by interpolating
+	B into the X axis range of A
+	"""
+	XA = A.Data.index
+	YA = A.Data.as_matrix(["Y Range"])
+	XB = B.Data.index
+	YB = B.Data.as_matrix(["Y Range"])
+	Interpolation = interpolate.interp1d(XB, YB)
+	RecastYB = Interpolation(XA)
+	Subtraction = YA - RecastYB
+	return FormatData(XA, Subtraction)
 
 def UpdateDictionary(OldDictionary, NewValues):
 	""" Will loop over keys in new dictionary and set
@@ -242,9 +330,9 @@ def ConvertOrderedDict(Dictionary):
 
 ###################################################################################################
 
-""" Fitting functions """
+""" Fitting functions & Analysis """
 
-def FitModel(DataFrame, Model):
+def FitModel(DataFrame, Model, Column="Y Range"):
 	""" Uses an instance of the Model class to fit data contained
 	in the pandas dataframe. Dataframe should have indices of the X-range
 	and column "Y Range" as the Y data to be fit to
@@ -264,21 +352,33 @@ def FitModel(DataFrame, Model):
 	print str(Bounds)
 	print " Initial parameters:"
 	OptimisedParameters, CovarianceMatrix = curve_fit(Model.Function,
-												      DataFrame.index,
-													  DataFrame["Y Range"], 
+												      np.array(DataFrame.index, dtype=float),
+													  DataFrame[Column].values, 
 													  UnpackDict(**Model.Variables),
 													  bounds=Bounds,
 													  method="trf")
-	ParameterReport = pd.DataFrame(data=OptimisedParameters,
+	ParameterReport = pd.DataFrame(data=zip(OptimisedParameters,
+	                                        CovarianceMatrix.diagonal(),
+	                                        np.sqrt(CovarianceMatrix.diagonal())),
+								   columns=["Values", "Variance", "Std. Dev."],
 			                       index=Model.Variables.keys())
-	ModelFit = Model.Function(DataFrame.index, *OptimisedParameters)
-	FittedCurves = pd.DataFrame(data=zip(DataFrame["Y Range"], ModelFit),
+	ModelFit = Model.Function(np.array(DataFrame.index, dtype=float),
+							  *OptimisedParameters)
+	FittedCurves = pd.DataFrame(data=zip(DataFrame[Column], ModelFit),
 			                        	 columns=["Data", "Model Fit"],
-			                         	 index=DataFrame.index)
+			                         	 index=np.array(DataFrame.index, dtype=float))
 	print " ------------------------------------------------------"
 	print " Parameter Report:"
 	print ParameterReport
+	CheckCovariance(CovarianceMatrix)
 	return OptimisedParameters, ParameterReport, FittedCurves, CovarianceMatrix
+
+def CheckCovariance(CovarianceMatrix, Threshold=1E-2):
+	OffDiagonalElements = NT.CheckOffDiagonal(CovarianceMatrix)
+	ThresholdedElements = [Element for Element in OffDiagonalElements if Element >= Threshold]
+	if len(ThresholdedElements) > 0:
+		print str(len(ThresholdedElements)) + " elements of covariance matrix larger than\t" + str(Threshold)
+		print " Check your privilege!"
 
 def PeakFinding(DataFrame, Threshold=0.3, MinimumDistance=30.):
 	""" Routine that will sniff out peaks in a spectrum, and fit them with Gaussian functions
@@ -293,6 +393,37 @@ def PeakFinding(DataFrame, Threshold=0.3, MinimumDistance=30.):
 		StickSpectrum[Index] = 1.
 	DataFrame["Stick Spectrum"] = StickSpectrum
 	return PeakIndices
+
+def VMICalibration(Spectrum):
+	""" Procedure for VMI calibration. This way we don't have
+	    to redo it over and over again.
+
+	    1. Detect peaks in loaded spectrum
+	    2. Assign peak indices to atom levels
+	"""
+	Threshold = float(raw_input(" Threshold for peak detection:"))
+	Spectrum.DetectPeaks(Threshold=Threshold)
+	Spectrum.PlotLabels()
+	from bokeh.io import output_notebook
+	output_notebook()
+	Spectrum.PlotAll(Interface="bokeh")
+	NLines = int(raw_input(" Number of peaks used for calibration?"))
+	PeakAssignments = ["3P", "5P", "3S", "5S"]
+	PeakDict = OrderedDict()
+	for n in xrange(NLines):
+		PeakDict[PeakAssignments[n]] = int(raw_input(" Index for peak:\t" + PeakAssignments[n]))
+	print Dict2List(OxygenAtomSpeed)
+	CalibrationData = FormatData(X=Dict2List(PeakDict).sort(), Y=Dict2List(OxygenAtomSpeed).sort())
+	LinearRegression = Model("Linear Regression")
+	LinearRegression.SetFunction(Linear)
+	LinearRegression.SetVariables({"Gradient": 5.,
+		                           "Offset": 10.})
+	popt, report, fits, pcov = FitModel(CalibrationData, LinearRegression)
+	Labels = {"Title": "Calibration for:\t" + Spectrum.Reference,
+	          "X Label": "Pixel speed",
+	          "Y Label": "Oxygen atom speed",
+	          }
+	PlotData(fits, Labels)
 
 ###################################################################################################
 
@@ -313,6 +444,7 @@ def BoltzmannFunction(x, Amplitude, Temperature):
 def Linear(x, Gradient, Offset):
 	return x * Gradient + Offset
 
+@jit
 def ConvolveArrays(A, B, method="new"):
 	""" Function I wrote to compute the convolution of two arrays.
 	The new method is written as a manual convolution calculated by
@@ -340,6 +472,10 @@ def ConvolveArrays(A, B, method="new"):
 
 ###################################################################################################
 
+""" Commonly used model objects """
+
+###################################################################################################
+
 """ File I/O and plotting functions """
 
 def LoadSpectrum(File, CalConstant=1.):
@@ -350,9 +486,13 @@ def LoadSpectrum(File, CalConstant=1.):
 	Assumes two-column data.
 	"""
 	Delimiter = NT.DetectDelimiter(File)                          # detect what delimiter
-	DataFrame = pd.read_csv(File, delimiter=Delimiter,
-					 header=None, names=["Y Range"],
-					 index_col=0)     							  # read file from csv
+	if NT.DetectHeader(File) != True:                             # see if header is there
+		DataFrame = pd.read_csv(File, delimiter=Delimiter,
+					    		header=None, names=["Y Range"],
+					            index_col=0)    				  # read file from csv
+	else:                                                         # if header is present
+		DataFrame = pd.read_csv(File, delimiter=Delimiter,
+			                    index_col=0)
 	DataFrame.set_index(DataFrame.index * CalConstant, inplace=True) # Modify index
 	DataFrame = DataFrame.dropna(axis=0)                          # removes all NaN values
 	return DataFrame
@@ -393,11 +533,11 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 		Colours = brewer["Spectral"][NCols]                   # Set colours depending on how many
 	Headers = list(DataFrame.columns.values)                  # Get the column heads
 	if Interface == "pyplot":                                 # Use matplotlib library
-		plt.figure(figsize=(10,5))
+		plt.figure(figsize=(12,6))
 		if Labels != None:
 			try:                                              # Unpack whatever we can from Labels
-				plt.xlabel(Labels["X Label"], fontsize=14.)
-				plt.ylabel(Labels["Y Label"], fontsize=14.)
+				plt.xlabel(Labels["X Label"], fontsize=18.)
+				plt.ylabel(Labels["Y Label"], fontsize=18.)
 				plt.title(Labels["Title"])
 				plt.xlim(Labels["X Limits"])
 				plt.ylim(Labels["Y Limits"])
@@ -429,7 +569,7 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
 				pass
 		else:
 			plot = figure(width=700, height=400, tools=tools)               # if we have no labels
-		plot.background_fill_color="gray"
+		plot.background_fill_color="beige"
 		for index, Data in enumerate(DataFrame):
 			plot.scatter(x=DataFrame.index, y=DataFrame[Data],
 				      line_width=2, color=Colours[index],

@@ -195,7 +195,6 @@ class Model:
 	def __init__(self, FunctionName):
 		self.FunctionName = FunctionName
 		self.Variables = {}
-		print " Please call SetFunction(Function)"
 	def SetFunction(self, ObjectiveFunction):
 		""" Sets what the model functionw will be. Will also automagically
 		initialise a dictionary that will hold all of the variables required,

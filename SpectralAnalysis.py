@@ -88,14 +88,25 @@ class Spectrum:
 		"""
 		DataFrame = pd.read_csv(File, delimiter="\t", header=None)
 		if DataFrame[1].sum > 0. == True:                   # If we've got calibrated wavelengths
-			X = DataFrame.as_matrix([1])
+			X = np.array(DataFrame[1])
 			print " Using calibrated wavelengths"
 		else:
-			X = DataFrame.as_matrix([0])
+			X = np.array(DataFrame[0])
 			print " Using bogscan wavelengths"
-		Y = -DataFrame.as_matrix([2])
+		if DataFrame[2].sum > -100. == True:                # if the axis is negative
+			Y = np.array(DataFrame[2])                      # I like plotting positive!
+		else:
+			Y = -np.array(DataFrame[2])
 		NewDataFrame = FormatData(X, Y)
 		self.Data = NewDataFrame
+	def Plot(self, Column="Y Range", Labels=None, Interface="pyplot"):
+		self.PlotLabels(Labels)
+		try:
+			self.Labels["Title"] = self.Reference
+		except AttributeError:
+			pass
+		Target = FormatData(self.Data.index, np.array(self.Data[Column]))
+		PlotData(Target, self.Labels, Interface)
 	def PlotAll(self, Labels=None, Interface="pyplot"):
 		self.PlotLabels(Labels)                     # Initialise labels
 		try:
@@ -144,7 +155,7 @@ class Spectrum:
 			Reference = raw_input(" No reference found, give me a name.")
 			self.FitResults.to_csv(Reference + Suffix)
 			print " File saved to:\t" + Reference + Suffix
-	def Fit(self, Model, Column="Y Range", Interface="pyplot", Mode="Loud"):
+	def Fit(self, Model, Column="Y Range", Interface="pyplot", Verbose=True):
 		""" Calls the FitModel function to fit the Data contained in this
 		instance.
 
@@ -156,15 +167,15 @@ class Spectrum:
 		"""
 		try:
 			FittingData = FormatData(self.Data.index, np.array(self.Data[Column]))
-			self.Opt, self.Report, self.FitResults, self.Cov = FitModel(FittingData, Model)
+			self.Opt, self.Report, self.FitResults, self.Cov = FitModel(FittingData, Model, Verbose=Verbose)
 			#self.Report["Errors"] = self.Cov.diagonal()
 			#self.Report.columns = ["Values", "Errors"]       # pack parameters and errors
-			if Mode == "Loud":
+			if Verbose == True:
 				PlotData(self.FitResults, Labels=self.Labels, Interface=Interface)
-			elif Mode == "Quiet":
+			elif Verbose == False:
 				pass
-		except KeyError:
-			print ''' No data column labelled "Y Range" '''
+		except RuntimeError:
+			print ''' No data column eligible for fitting/"Y Range" doesn't exist. '''
 			print ''' You may need to repack the data manually using FormatData. '''
 	def DetectPeaks(self, Threshold=0.3, MinimumDistance=30.):
 		""" Calls the peak finding function from peakutils that will
@@ -180,6 +191,36 @@ class Spectrum:
 		    with the specified window size.
 		"""
 		self.Data["Smoothed"] = np.array(NT.SGFilter(self.Data[Column], WindowSize))
+	def BootstrapAnalysis(self, Model, DampFactor=0.5, Trials=100):
+		""" Routine that will take a Spectral object and
+		    perform Bootstrap analysis: will generate synthetic data
+		    from a fit and repeatedly refit to get a sense of
+		    uncertainty
+		"""
+		try:
+			OriginalFit = np.array(self.FitResults["Model Fit"])
+			X = np.array(self.FitResults.index)
+		except AttributeError:
+			print " No fit results detected."
+			exit
+		BootstrapResults = []
+		for Trial in xrange(Trials):
+			if ((float(Trial) / float(Trials)) * 100) % 20 == 0:      # check percentage progress
+				print "Trials Done:\t" + str(Trial)
+			NewData = AddNoise(OriginalFit, DampFactor)
+			try:
+				NewFrame = FormatData(X, NewData)
+				with NT.suppress_stdout():
+					Opt, Report, Curves, Cov = FitModel(NewFrame,
+						                                Model)
+				BootstrapResults.append(Opt)
+			except RuntimeError:
+				pass
+		self.BootstrapResults = pd.DataFrame(data=BootstrapResults,
+			                                columns=Model.Variables)
+		self.BootstrapReport = self.BootstrapResults.describe()
+		self.BootstrapReport
+		print " Finished analysis. Check object BootstrapReport"
 
 class Model:
 	""" Class for fitting models and functions. Ideally, I'll have a
@@ -195,7 +236,12 @@ class Model:
 	def __init__(self, FunctionName):
 		self.FunctionName = FunctionName
 		self.Variables = {}
+<<<<<<< HEAD
 	def SetFunction(self, ObjectiveFunction):
+=======
+		print " Please call SetFunction(Function)"
+	def SetFunction(self, ObjectiveFunction, Verbose=True):
+>>>>>>> degub
 		""" Sets what the model functionw will be. Will also automagically
 		initialise a dictionary that will hold all of the variables required,
 		as well as the boundary conditions
@@ -208,19 +254,22 @@ class Model:
 			pass
 		self.BoundaryConditions = ([-np.inf for Variable in self.Variables],
 			                       [np.inf for Varaible in self.Variables])
-		print " Initialised variable dictionary:"
-		print self.Variables
-	def SetVariables(self, Variables):
+		if Verbose == True:
+			print " Initialised variable dictionary:"
+			print self.Variables
+	def SetVariables(self, Variables, Verbose=True):
 		self.Variables = UpdateDictionary(self.Variables, Variables)
-		print " Variables set to:"
-		print str(self.Variables)
-	def SetBounds(self, Bounds):
+		if Verbose == True:
+			print " Variables set to:"
+			print str(self.Variables)
+	def SetBounds(self, Bounds, Verbose=True):
 		""" Method for setting the boundary conditions for curve_fit,
 		requires input as 2-tuple list ([], [])
 		"""
 		self.BoundaryConditions = Bounds
-		print " Boundary conditions set to:" 
-		print str(self.BoundaryConditions)
+		if Verbose == True:
+			print " Boundary conditions set to:" 
+			print str(self.BoundaryConditions)
 	def ResetAttributes(self):
 		""" Wipes the variable and boundary conditions
 		"""
@@ -331,7 +380,7 @@ def ConvertOrderedDict(Dictionary):
 
 """ Fitting functions & Analysis """
 
-def FitModel(DataFrame, Model, Column="Y Range"):
+def FitModel(DataFrame, Model, Column="Y Range", Verbose=False):
 	""" Uses an instance of the Model class to fit data contained
 	in the pandas dataframe. Dataframe should have indices of the X-range
 	and column "Y Range" as the Y data to be fit to
@@ -342,14 +391,16 @@ def FitModel(DataFrame, Model, Column="Y Range"):
 	Returns the optimised parameters, a fitting report as a dataframe,
 	the fitted curves for easy plotting, and the covariance matrix.
 	"""
-	print " Curve fitting with:\t" + Model.FunctionName
+	if Verbose == True:
+		print " Curve fitting with:\t" + Model.FunctionName
 	if type(Model.BoundaryConditions) == "dict":
 		Bounds = (Dict2List(Model.BoundaryConditions[0]), Dict2List(Model.BoundaryConditions[1]))
 	else:
 		Bounds = Model.BoundaryConditions
-	print " Boundary Conditions:"
-	print str(Bounds)
-	print " Initial parameters:"
+	if Verbose == True:
+		print " Boundary Conditions:"
+		print str(Bounds)
+		print " Initial parameters:"
 	OptimisedParameters, CovarianceMatrix = curve_fit(Model.Function,
 												      np.array(DataFrame.index, dtype=float),
 													  DataFrame[Column].values, 
@@ -366,10 +417,11 @@ def FitModel(DataFrame, Model, Column="Y Range"):
 	FittedCurves = pd.DataFrame(data=zip(DataFrame[Column], ModelFit),
 			                        	 columns=["Data", "Model Fit"],
 			                         	 index=np.array(DataFrame.index, dtype=float))
-	print " ------------------------------------------------------"
-	print " Parameter Report:"
-	print ParameterReport
-	CheckCovariance(CovarianceMatrix)
+	if Verbose == True:
+		print " ------------------------------------------------------"
+		print " Parameter Report:"
+		print ParameterReport
+		CheckCovariance(CovarianceMatrix)
 	return OptimisedParameters, ParameterReport, FittedCurves, CovarianceMatrix
 
 def CheckCovariance(CovarianceMatrix, Threshold=1E-2):
@@ -423,6 +475,28 @@ def VMICalibration(Spectrum):
 	          "Y Label": "Oxygen atom speed",
 	          }
 	PlotData(fits, Labels)
+
+def AddNoise(Y, DampFactor=0.5):
+	"""
+	Function to add random noise to data; this will be used for Bootstrap
+	analysis. Superior to the previously written version because
+	it won't add noise to where it shouldn't be.
+
+	Should work for any arbitrary size of data
+
+	A damp factor is included to soften the noise if it's too noisy.
+	"""
+	NewData = np.zeros((len(Y)), dtype=float)
+	Iterator = np.nditer(Y, flags=['f_index'])      # loop over elements
+	while not Iterator.finished:
+		Delta = np.random.rand() >= 0.5             # flip a coin to determine
+		if Delta == True:                           # the sign of the noise
+			Multiplier = 1. * DampFactor
+		else:
+			Multiplier = -1. * DampFactor
+		NewData[Iterator.index] = Y[Iterator.index] + (Y[Iterator.index] * np.random.rand() * Multiplier)
+		Iterator.iternext()                         # Next iteration of loop
+	return NewData
 
 ###################################################################################################
 

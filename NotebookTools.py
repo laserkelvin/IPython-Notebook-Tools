@@ -10,8 +10,26 @@ import csv
 import cPickle as pickle
 from scipy import constants
 from scipy.signal import savgol_filter
+from contextlib import contextmanager
+import sys
+import os
 
 ################## General notebook functions ####################
+
+@contextmanager
+def suppress_stdout():
+    """ Will supress the standard output
+        Usage:
+        with suppress_stdout():
+            function_call()
+    """
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:  
+            yield
+        finally:
+            sys.stdout = old_stdout
 
 def ConvertUnit(Initial, Target):
     """ Convert units by specify what the initial unit is

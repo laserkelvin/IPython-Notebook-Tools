@@ -150,10 +150,10 @@ class Spectrum:
 		print " File saved to:\t" + FilePath
 	def ExportFits(self, Suffix="_fit.csv"):
 		try:
-			self.FitResults.to_csv(self.Reference + Suffix)
+			self.FitResults.to_csv("./DataExport/" + self.Reference + Suffix)
 		except AttributeError:
 			Reference = raw_input(" No reference found, give me a name.")
-			self.FitResults.to_csv(Reference + Suffix)
+			self.FitResults.to_csv("./DataExport/" + Reference + Suffix)
 			print " File saved to:\t" + Reference + Suffix
 	def Fit(self, Model, Column="Y Range", Interface="pyplot", Verbose=True):
 		""" Calls the FitModel function to fit the Data contained in this
@@ -199,6 +199,7 @@ class Spectrum:
 		"""
 		try:
 			OriginalFit = np.array(self.FitResults["Model Fit"])
+			OriginalData = np.array(self.FitResults["Data"])
 			X = np.array(self.FitResults.index)
 		except AttributeError:
 			print " No fit results detected."
@@ -207,7 +208,7 @@ class Spectrum:
 		for Trial in xrange(Trials):
 			if ((float(Trial) / float(Trials)) * 100) % 20 == 0:      # check percentage progress
 				print "Trials Done:\t" + str(Trial)
-			NewData = AddNoise(OriginalFit, DampFactor)
+			NewData = AddNoise(OriginalData, DampFactor)
 			try:
 				NewFrame = FormatData(X, NewData)
 				with NT.suppress_stdout():
@@ -236,12 +237,7 @@ class Model:
 	def __init__(self, FunctionName):
 		self.FunctionName = FunctionName
 		self.Variables = {}
-<<<<<<< HEAD
-	def SetFunction(self, ObjectiveFunction):
-=======
-		print " Please call SetFunction(Function)"
 	def SetFunction(self, ObjectiveFunction, Verbose=True):
->>>>>>> degub
 		""" Sets what the model functionw will be. Will also automagically
 		initialise a dictionary that will hold all of the variables required,
 		as well as the boundary conditions
@@ -306,6 +302,16 @@ def NormaliseColumn(DataFrame, Column="Y Range"):
 def Dict2List(Dictionary):
 	List = [Dictionary[Item] for Item in Dictionary]
 	return List
+
+def GetFitParameters(FitReport, Parameters):
+	""" Takes a input list of Parameter names
+	    and will return the optimised parameters
+	    in a dictionary
+	"""
+	ParameterOut = dict()
+	for Parameter in Parameters:
+		ParameterOut[Parameter] = FitReport["Values"][Parameter]
+	return ParameterOut
 
 def UnpackDict(**args):
 	""" I don't know if there's a better way of doing this,

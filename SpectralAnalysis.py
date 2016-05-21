@@ -7,7 +7,7 @@ import pandas as pd
 import NotebookTools as NT
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.style.use('ggplot')
+matplotlib.style.use('seaborn-pastel')
 from scipy import constants
 import os
 import peakutils

@@ -59,7 +59,6 @@ class PlotContainerGUI:
         plt.figure("Main")
         plt.clf()
         self.InitialisePlots()
-        self.UpdateSettings()
         for Key in self.ClassReferences:
             if not self.PlotSettings[Key.Name.value]["PlotBoolean"]:
                 plt.setp(self.DatatoPlot[Key.Name.value], visible=False)

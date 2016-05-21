@@ -7,7 +7,7 @@ import pandas as pd
 import NotebookTools as NT
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.style.use('seaborn-pastel')
+#matplotlib.style.use('seaborn-pastel')
 from scipy import constants
 import os
 import peakutils
@@ -18,6 +18,7 @@ from scipy.optimize import curve_fit
 from bokeh.palettes import brewer
 from bokeh.plotting import figure, show
 from numba import jit
+import InteractiveWidgets as IW
 
 # SpectralAnalysis.py
 
@@ -99,6 +100,8 @@ class Spectrum:
 			Y = -np.array(DataFrame[2])
 		NewDataFrame = FormatData(X, Y)
 		self.Data = NewDataFrame
+	def WidgetPlot(self):
+		self.PlotWidget = IW.PlotContainerGUI(self.Data)
 	def Plot(self, Column="Y Range", Labels=None, Interface="pyplot"):
 		self.PlotLabels(Labels)
 		try:

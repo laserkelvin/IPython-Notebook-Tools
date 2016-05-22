@@ -9,6 +9,7 @@ from matplotlib.lines import Line2D
 import ipywidgets as widgets
 from IPython.display import display
 import numpy as np
+from itertools import cycle
 
 plt.style.use("fivethirtyeight")
 class PlotContainerGUI:
@@ -86,8 +87,10 @@ class PlotContainerGUI:
         except KeyError:
             ColourMap = cm.Spectral                                   # Default to spectral, good for several plots
         if self.PlotCount <= 2:
-            self.Colours = ["red" for Keys in self.DataFrame.keys()]  # if there's only one plot, make it red.
-        else:
+            ColourGenerator = cycle(["red", "green", "blue"])
+            self.Colours = [Colour for Colour, Key in zip(ColourGenerator,
+                                                          self.DataFrame.keys())]  # if there's only one plot, make it red.
+        elif self.PlotCount > 2:
             self.Colours = ColourMap(np.linspace(0, 1, self.PlotCount))   # This generates enough colours
 
     def InitialisePlots(self):
@@ -164,7 +167,7 @@ class PlotContainerGUI:
                                        value="Y Axis",
                                        width=120)
             self.PlotTitle = widgets.Text(description="Plot Title",
-                                          value="Default Title",
+                                          value="Main",
                                           width=120)
             self.Container = widgets.HBox(children=[self.UpdateFigure,
                                                     self.Style,

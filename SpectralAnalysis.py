@@ -158,10 +158,14 @@ class Spectrum:
         print " File saved to:\t" + FilePath
     def ExportFits(self, Suffix="_fit.csv"):
         try:
-            self.FitResults.to_csv("./DataExport/" + self.Reference + Suffix)
+            os.mkdir("FittingResults")
+        except OSError:
+            pass
+        try:
+            self.FitResults.to_csv("./FittingResults/" + self.Reference + Suffix)
         except AttributeError:
             Reference = raw_input(" No reference found, give me a name.")
-            self.FitResults.to_csv("./DataExport/" + Reference + Suffix)
+            self.FitResults.to_csv("./FittingResults/" + Reference + Suffix)
             print " File saved to:\t" + Reference + Suffix
     def Fit(self, Model, Column="Y Range", Interface="pyplot", Verbose=True):
         """ Calls the FitModel function to fit the Data contained in this
@@ -172,6 +176,9 @@ class Spectrum:
 
         Sets attributes of instance corresponding to the optimised parameters,
         the fit report, the fitted curves dataframe and covariance matrix
+
+        Verbose mode will toggle between lots of printing or no printing at all
+        when you may want to do batch fits (like in BootstrapAnalysis).
         """
         try:
             FittingData = FormatData(self.Data.index, np.array(self.Data[Column]))
@@ -182,6 +189,7 @@ class Spectrum:
                 PlotData(self.FitResults, Labels=self.Labels, Interface=Interface)
             elif Verbose == False:
                 pass
+            self.Data["Fit Results"] = self.FitResults["Model Fit"]
         except RuntimeError:
             print ''' No data column eligible for fitting/"Y Range" doesn't exist. '''
             print ''' You may need to repack the data manually using FormatData. '''
@@ -198,7 +206,10 @@ class Spectrum:
         """ Smooths the experimental data using a Svatizky-Golay filter
             with the specified window size.
         """
-        self.Data["Smoothed"] = np.array(NT.SGFilter(self.Data[Column], WindowSize))
+        try:
+            self.Data[Column + "-Smoothed"] = np.array(NT.SGFilter(self.Data[Column], WindowSize))
+        except KeyError:
+            print " No column " + Column + " found in DataFrame."
     def BootstrapAnalysis(self, Model, DampFactor=0.5, Trials=100):
         """ Routine that will take a Spectral object and
             perform Bootstrap analysis: will generate synthetic data
@@ -254,6 +265,7 @@ class Model:
         self.Variables = OrderedDict.fromkeys(inspect.getargspec(ObjectiveFunction)[0])
         try:
             del self.Variables["x"]                  # X keeps getting picked up, get rid of it
+            del self.Variables["X"]
         except KeyError:
             pass
         self.BoundaryConditions = ([-np.inf for Variable in self.Variables],
@@ -261,6 +273,16 @@ class Model:
         if Verbose == True:
             print " Initialised variable dictionary:"
             print self.Variables
+    def NewSetFunction(self, FunctionList, Verbose=True):
+        self.FunctionList = FunctionList
+        self.VariableDict = OrderedDict()
+        for Function in self.FunctionList:
+            self.VariableDict[Function.func_name] = OrderedDict.fromkeys(inspect.getargspec(Function)[0])
+            try:
+                del self.VariableDict[Function.func_name]["x"]
+                del self.VariableDict[Function.func_name]["X"]
+            except KeyError:
+                pass
     def SetVariables(self, Variables, Verbose=True):
         self.Variables = UpdateDictionary(self.Variables, Variables)
         if Verbose == True:

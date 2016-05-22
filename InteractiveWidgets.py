@@ -3,10 +3,12 @@
 #!/bin/python
 
 import matplotlib.pyplot as plt
-import ipywidgets as widgets
+from matplotlib import cm
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
+import ipywidgets as widgets
 from IPython.display import display
+import numpy as np
 
 plt.style.use("fivethirtyeight")
 class PlotContainerGUI:
@@ -74,16 +76,32 @@ class PlotContainerGUI:
         """
         plt.figure("Main", figsize=(12,8))
         self.UpdateSettings()
-        for Key in self.ClassReferences:
+        try:
+            ColourMap = cm.__dict__[self.FigureSetup.PlotColours.value]
+        except KeyError:
+            ColourMap = cm.viridis
+        Colours = ColourMap(np.linspace(0, len(self.DataFrame.keys()), len(self.DataFrame.keys())))
+        for Key, Colour in zip(self.ClassReferences, Colours):
             self.PlotSettings[Key.Name.value] = Key.GetSettings()
-            self.DatatoPlot[Key.Name.value] = plt.plot(self.DataFrame.index,
-                                                       self.DataFrame[Key.DataReference],
-                                                       label=Key.Name.value,
-                                                       marker=self.PlotSettings[Key.Name.value]["PlotType"],
-                                                       alpha=0.8,
-                                                       linestyle=":",
-                                                       markersize=10
-                                                      )
+            if self.PlotSettings[Key.Name.value]["PlotColour"] == "Default":
+                self.DatatoPlot[Key.Name.value] = plt.plot(self.DataFrame.index,
+                                                           self.DataFrame[Key.DataReference],
+                                                           label=Key.Name.value,
+                                                           marker=self.PlotSettings[Key.Name.value]["PlotType"],
+                                                           alpha=0.8,
+                                                           linestyle=":",
+                                                           markersize=10,
+                                                          )
+            else:
+                self.DatatoPlot[Key.Name.value] = plt.plot(self.DataFrame.index,
+                                                           self.DataFrame[Key.DataReference],
+                                                           label=Key.Name.value,
+                                                           marker=self.PlotSettings[Key.Name.value]["PlotType"],
+                                                           alpha=0.8,
+                                                           linestyle=":",
+                                                           markersize=10,
+                                                           c=Colour
+                                                          )
         plt.legend()
         
     def UpdatePlot(self, Blank):
@@ -112,11 +130,14 @@ class PlotContainerGUI:
     class FigureSettings:
         """ General plotting settings, such as colours and whatnot """
         def __init__(self):
+            ColourMaps = ["Default", "viridis", "inferno", "magma",
+                          "Spectral", "Pastel1", "coolwarm"]
             self.Style = widgets.Dropdown(description="Plot Style Sheet",
                                           value="seaborn-pastel",
                                           options=plt.style.available)
-            self.CustomPlotColours = widgets.Checkbox(description="Use custom plot colours?",
-                                                      value=False)
+            self.PlotColours = widgets.Dropdown(description="Plot Colours",
+                                                options=ColourMaps,
+                                                value="Default")
             self.UpdateFigure = widgets.Button(description="Update plot")
             self.XLabel = widgets.Text(description="X Axis Label",
                                        value="X Axis",
@@ -129,7 +150,7 @@ class PlotContainerGUI:
                                           width=120)
             self.Container = widgets.HBox(children=[self.UpdateFigure,
                                                     self.Style,
-                                                    #self.CustomPlotColours,
+                                                    self.PlotColours,
                                                     self.XLabel,
                                                     self.YLabel,
                                                     self.PlotTitle
@@ -167,7 +188,7 @@ class PlotContainerGUI:
                                              value="o"
                                              )
             self.PlotBoolean = widgets.Checkbox(description="Show Plot?",
-                                                value=True)
+                                                value=False)
             self.SettingsContainer = widgets.HBox(children=[self.PlotBoolean,
                                                             self.PlotType,
                                                             self.PlotColour,

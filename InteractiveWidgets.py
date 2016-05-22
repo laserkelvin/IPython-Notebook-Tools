@@ -85,7 +85,7 @@ class PlotContainerGUI:
             ColourMap = cm.__dict__[self.FigureSetup.PlotColours.value]
         except KeyError:
             ColourMap = cm.Spectral                                   # Default to spectral, good for several plots
-        if self.PlotCount <= 1:
+        if self.PlotCount <= 2:
             self.Colours = ["red" for Keys in self.DataFrame.keys()]  # if there's only one plot, make it red.
         else:
             self.Colours = ColourMap(np.linspace(0, 1, self.PlotCount))   # This generates enough colours

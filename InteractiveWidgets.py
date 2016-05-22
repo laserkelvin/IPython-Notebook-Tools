@@ -46,8 +46,8 @@ class PlotContainerGUI:
         # Populate the tab menu with tabs
         self.MainTabs = widgets.Tab(children=self.TabReferences)
         self.FigureSetup = self.FigureSettings()
-        self.PlotSettings = dict()                # Holds the 
-        self.DatatoPlot = dict()                  # Dictionary of the actual plots
+        self.PlotSettings = dict()                # Needs and wants of all each plot 
+        self.DatatoPlot = dict()                  # Dictionary of instances of plots
         display(self.MainTabs)
         display(self.FigureSetup.Container)
         self.InitialisePlots()
@@ -59,30 +59,48 @@ class PlotContainerGUI:
         for Index, Key in enumerate(self.PlotTabs):
             self.MainTabs.set_title(Index, Key)
             
-    def UpdateSettings(self):
+    def UpdateFigureSettings(self):
         self.Settings = dict()
         self.Settings = self.FigureSetup.GetSettings()
         plt.xlabel(self.Settings["XLabel"])
         plt.ylabel(self.Settings["YLabel"])
         plt.title(self.Settings["PlotTitle"])
         plt.style.use(self.Settings["Style"])
-            
+        
+    def DefineColours(self):
+        """ Method for generating a colour palette. 
+            This is done by checking how many plots are
+            actually going to be plotted by their Booleans,
+            then generating a 1D array with the RGB values
+            for a specific colourmap.
+
+        """
+        # Count the total number of plots we're going to make; sum of boolean values
+        PlotList = []
+        for Key in self.ClassReferences:
+            self.PlotSettings[Key.Name.value] = Key.GetSettings()
+            PlotList.append(self.PlotSettings[Key.Name.value]["PlotBoolean"])
+        self.PlotCount = np.sum(PlotList)
+        try:
+            ColourMap = cm.__dict__[self.FigureSetup.PlotColours.value]
+        except KeyError:
+            ColourMap = cm.Spectral                                   # Default to spectral, good for several plots
+        if self.PlotCount <= 1:
+            self.Colours = ["red" for Keys in self.DataFrame.keys()]  # if there's only one plot, make it red.
+        else:
+            self.Colours = ColourMap(np.linspace(0, 1, self.PlotCount))   # This generates enough colours
+
     def InitialisePlots(self):
         """ Method for plotting data. This will reference a figure
             called "Main", and generate plots in that figure.
 
             Before the plotting is done, the figure settings are
-            retrieved from FigureSetup, called in UpdateSettings.
+            retrieved from FigureSetup, called in UpdateFigureSettings.
         """
         plt.figure("Main", figsize=(12,8))
-        self.UpdateSettings()
-        try:
-            ColourMap = cm.__dict__[self.FigureSetup.PlotColours.value]
-        except KeyError:
-            ColourMap = cm.viridis
-        Colours = ColourMap(np.linspace(0, len(self.DataFrame.keys()), len(self.DataFrame.keys())))
-        for Key, Colour in zip(self.ClassReferences, Colours):
-            self.PlotSettings[Key.Name.value] = Key.GetSettings()
+        self.UpdateFigureSettings()
+        self.DefineColours()          # Generates colour palette as well as retrieves plot settings
+        for Key, Colour in zip(self.ClassReferences, self.Colours):
             if self.PlotSettings[Key.Name.value]["PlotColour"] == "Default":
                 self.DatatoPlot[Key.Name.value] = plt.plot(self.DataFrame.index,
                                                            self.DataFrame[Key.DataReference],
@@ -103,7 +121,7 @@ class PlotContainerGUI:
                                                            c=Colour
                                                           )
         plt.legend()
-        
+
     def UpdatePlot(self, Blank):
         """ This method is called each time
             the Update Plot button is clicked.
@@ -191,7 +209,7 @@ class PlotContainerGUI:
                                                 value=False)
             self.SettingsContainer = widgets.HBox(children=[self.PlotBoolean,
                                                             self.PlotType,
-                                                            self.PlotColour,
+                                                            #self.PlotColour,
                                                             self.Name
                                                             ],
                                                   padding=20)

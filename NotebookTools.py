@@ -13,6 +13,8 @@ from scipy.signal import savgol_filter
 from contextlib import contextmanager
 import sys
 import os
+import glob
+import h5py
 
 ################## General notebook functions ####################
 
@@ -156,6 +158,80 @@ def LoadObject(Database):
         temp = pickle.load(db)
     db.close()
     return temp
+
+###################         HDF5 Tools          ###################
+
+""" Technically should be under I/O, but I think this is a special
+    case since I hope to use it more often...
+
+    Still need to write a write data function to add stuff into
+    a database.
+"""
+
+def StripSuffixes(Filename):
+    """ Removes all of the suffixes for a file, which means
+        the file extension and also anything that I might've
+        added as comment like _CBS or _REMPI.
+    """
+    return Filename.split(".")[0].split("_")[0]
+
+def StripExtension(Filename):
+    """ Strips the extension of the file only. """
+    return Filename.split(".")[0]
+
+def LoadDatabase(Database):
+    """ Attempts to load a database with exception catching.
+        If the database doesn't exist, raise an error.
+        
+        Returns the loaded database
+    """
+    try:
+        Temp = h5py.File(Database, "r+")
+    except IOError:
+        print "Database does not exist."
+        exit()
+    return Temp
+
+def LoadReference(Database, Reference):
+    """ Used to retrieve a reference from a database.
+        Returns all of the data in a dictionary associated 
+        with a logbook reference.
+    """
+    Dictionary = dict()
+    for Key in Database[Reference].keys():
+        Dictionary[Key] = Database[Reference][Key][...]
+    return Dictionary
+
+def PackDirectory(Database, FileTypes=["*.dat", "*.bin"]):
+    """ Pack a directory of files with a given extension into
+        an HDF5 database.
+        I wrote this with logbook references in mind, so the
+        general group hierarchy is:
+        
+        /Reference/Datafile/Data
+        
+        where Data is the actual dataset, and Datafile is the
+        actual filename, and Reference is the logbook reference
+        stripped of all suffixes.
+    """
+    with h5py.File(Database,"a") as HF:
+        for Files in FileTypes:              # Loop over the specified filetypes
+            A = glob.glob(Files)             # and generate a list of files
+            for item in A:
+                Reference = StripSuffixes(item)    # See if there's already a group
+                if Reference not in HF.keys():     # in the database, if not create it
+                    HF.create_group("/" + Reference)
+                try:
+                    HF[Reference].create_dataset(StripExtension(item),  # Load the data
+                                                 data=np.loadtxt(item), # into database
+                                                 compression="gzip",    # and compress it
+                                                 compression_opts=9
+                                                 )
+                except (RuntimeError, ValueError):                      # Catches numpy load
+                    print StripExtension(item) + " cannot be loaded."   # and compression errors
+                    pass
+        HF.close() 
+
 
 ################### Speed Distribution Analysis ###################
 

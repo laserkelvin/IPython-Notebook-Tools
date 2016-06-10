@@ -100,7 +100,7 @@ class PlotContainerGUI:
             Before the plotting is done, the figure settings are
             retrieved from FigureSetup, called in UpdateFigureSettings.
         """
-        plt.figure("Main", figsize=(12,8))
+        plt.figure("Main", figsize=(12,6))
         self.UpdateFigureSettings()
         self.DefineColours()          # Generates colour palette as well as retrieves plot settings
         for Key, Colour in zip(self.ClassReferences, self.Colours):

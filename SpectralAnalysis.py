@@ -7,14 +7,14 @@ import pandas as pd
 import NotebookTools as NT
 import matplotlib
 import matplotlib.pyplot as plt
-#matplotlib.style.use('seaborn-pastel')
+matplotlib.style.use('seaborn-pastel')
 from scipy import constants
 import os
 import peakutils
 from scipy import fftpack
 from scipy import signal
 from scipy import interpolate
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, leastsq
 from bokeh.palettes import brewer
 from bokeh.plotting import figure, show
 from numba import jit
@@ -154,7 +154,7 @@ class Spectrum:
             except AttributeError:
                 Reference = raw_input("No reference found, please provide one.")
                 FilePath = "./DataExport/" + Reference + Suffix
-        self.Data.to_csv(FilePath, header=False)
+        self.Data.to_csv(FilePath)
         print " File saved to:\t" + FilePath
     def ExportFits(self, Suffix="_fit.csv"):
         try:
@@ -319,6 +319,7 @@ def ConvertSpeedDistribution(DataFrame, Mass, Units="cm"):
         Conversion = .0103636
     KER = (np.square(DataFrame.index) * (Mass / 1000.) / 2000.) * Conversion
     PE = DataFrame["Y Range"].values / (Mass / 1000. * DataFrame.index)
+    PE = [0. if Value < 0. else Value for Value in PE ]           # set negative values to zero
     KERDataFrame = pd.DataFrame(data=PE, index=KER, columns=["Y Range"])
     KERDataFrame = KERDataFrame.dropna(axis=0)
     #for index, value in enumerate(KERDataFrame)
@@ -459,6 +460,41 @@ def FitModel(DataFrame, Model, Column="Y Range", Verbose=False):
         print ParameterReport
         CheckCovariance(CovarianceMatrix)
     return OptimisedParameters, ParameterReport, FittedCurves, CovarianceMatrix
+
+class LeastSqObject:
+    def __init__(self, DataFrame, Column="Y Range"):
+        self.Data = DataFrame
+        self.XData = DataFrame.index 
+        self.YData = DataFrame[Column]
+        self.InitialParameters = []
+
+    def SetFunction(self, Function):
+        """ This is the model function that will be used
+            to generate the model data; e.g. np.sin(x)
+        """
+        self.Function = Function
+        def ResidualFunction(self, Parameters):
+            """ Procedurally generate the residual function """
+            return self.YData - self.Function(*Parameters)
+        self.ResidualFunction = ResidualFunction
+
+    def MinimizeFunction(self):
+        self.OptimisedParameters, self.CovarianceMatrix = leastsq(self.ResidualFunction,
+                                                                  self.InitialParameters,
+                                                                  args=(self.XData, self.YData))
+
+
+def LeastSqFit(ResidualFunction, InitialParameters, DataFrame, Column="Y Range"):
+    """ Function for using scipy.optimize.leastsq to generically fit
+        data, rather than use curve_fit
+    """
+    XData = DataFrame.index
+    try:
+        YData = np.array(DataFrame[Column])
+    except KeyError:
+        print " No column named " + Column + " in DataFrame."
+        exit()
+    return leastsq(ResidualFunction, InitialParameters, args=(XData, YData))
 
 def CheckCovariance(CovarianceMatrix, Threshold=1E-2):
     OffDiagonalElements = NT.CheckOffDiagonal(CovarianceMatrix)
@@ -629,6 +665,16 @@ def GenerateJComb(DataFrame, TransitionEnergies, Offset=1.3, Teeth=0.2, SelectJ=
     for index in Indices:
         Comb[index] = Comb[index] - Teeth
     DataFrame["Comb"] = Comb
+
+def PickleSpectra(DataBase):
+	PickleDictionary = dict()
+	for Instance in Spectrum.instances:
+		try:
+			PickleDictionary[Instance.Reference] = Instance
+		except AttributeError:
+			print " No reference for " + Instance + ", skipping."
+			pass
+	NT.SaveObject(PickleDictionary, DataBase)
 
 def PlotData(DataFrame, Labels=None, Interface="pyplot"):
     """ A themed data plotting routine. Will use either matplotlib or

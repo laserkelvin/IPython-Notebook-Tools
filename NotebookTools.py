@@ -202,6 +202,21 @@ def LoadReference(Database, Reference):
         Dictionary[Key] = Database[Reference][Key][...]
     return Dictionary
 
+def AddDatabaseEntry(Database, File):
+    """ Used to add a file to a database. """
+    Reference = StripSuffixes(File)
+    if Reference not in Database.keys():         # See if there's already a group
+        Database.create_group("/" + Reference)   # in the database, if not create it
+    try:
+        Database[Reference].create_dataset(StripExtension(File),    # Load the data
+                                           data=np.fromfile(File),  # into database
+                                           compression="gzip",      # and compress it
+                                           compression_opts=9
+                                           )
+    except (RuntimeError, ValueError):                          # Catches numpy load
+        print StripExtension(File) + " could be loaded."        # and compression errors
+        pass
+
 def PackDirectory(Database, FileTypes=["*.dat", "*.bin"]):
     """ Pack a directory of files with a given extension into
         an HDF5 database.
@@ -218,18 +233,7 @@ def PackDirectory(Database, FileTypes=["*.dat", "*.bin"]):
         for Files in FileTypes:              # Loop over the specified filetypes
             A = glob.glob(Files)             # and generate a list of files
             for item in A:
-                Reference = StripSuffixes(item)    # See if there's already a group
-                if Reference not in HF.keys():     # in the database, if not create it
-                    HF.create_group("/" + Reference)
-                try:
-                    HF[Reference].create_dataset(StripExtension(item),  # Load the data
-                                                 data=np.loadtxt(item), # into database
-                                                 compression="gzip",    # and compress it
-                                                 compression_opts=9
-                                                 )
-                except (RuntimeError, ValueError):                      # Catches numpy load
-                    print StripExtension(item) + " cannot be loaded."   # and compression errors
-                    pass
+                AddDatabaseEntry(HF, item)   # Call routine to add a file
         HF.close() 
 
 

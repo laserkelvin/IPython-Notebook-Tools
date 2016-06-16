@@ -7,7 +7,7 @@ import pandas as pd
 import NotebookTools as NT
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.style.use(['fivethirtyeight', 'seaborn-pastel', ])
+matplotlib.style.use(['seaborn-pastel', ])
 from scipy import constants
 import os
 import peakutils
@@ -118,6 +118,10 @@ class Spectrum:
         self.Data.to_csv(FilePath)
         print " File saved to:\t" + FilePath
 
+    def KERfromPES(self, File, Mass):
+        PES = LoadSpectrum(File, self.CalibrationConstant)
+        self.Data = ConvertSpeedDistribution(PES, Mass)
+
     def ExportFits(self, Suffix="_fit.csv"):
         try:
             os.mkdir("FittingResults")
@@ -158,18 +162,18 @@ class Spectrum:
             pass
         self.PlotWidget.UpdatePlot(1)   # Random input to make it work
 
-    def Plot(self, Column="Y Range", Labels=None, Interface="pyplot"):
+    def Plot(self, Column="Y Range", Labels=None, Legend=True, Interface="pyplot"):
         self.PlotLabels()
         if Labels is not None:
             self.SetLabels(Labels)
         Target = FormatData(self.Data.index, np.array(self.Data[Column]))
-        PlotData(Target, self.Labels, Interface)
+        PlotData(DataFrame=Target, Labels=self.Labels, Interface=Interface, Legend=Legend)
 
-    def PlotAll(self, Labels=None, Interface="pyplot"):
+    def PlotAll(self, Labels=None, Legend=True, Interface="pyplot"):
         self.PlotLabels()
         if Labels is not None:
             self.SetLabels(Labels)
-        PlotData(self.Data, self.Labels, Interface)
+        PlotData(DataFrame=self.Data, Labels=self.Labels, Interface=Interface, Legend=Legend)
 
     def PlotLabels(self):
         Labels = {"X Label": "X Axis",
@@ -563,18 +567,24 @@ def VMICalibration(Spectrum):
     PeakDict = OrderedDict()
     for n in xrange(NLines):
         PeakDict[PeakAssignments[n]] = int(raw_input(" Index for peak:\t" + PeakAssignments[n]))
-    print Dict2List(OxygenAtomSpeed)
-    CalibrationData = FormatData(X=Dict2List(PeakDict).sort(), Y=Dict2List(OxygenAtomSpeed).sort())
+    CalibrationData = FormatData(X=sorted(Dict2List(PeakDict)), Y=sorted(Dict2List(OxygenAtomSpeed)))
     LinearRegression = Model("Linear Regression")
     LinearRegression.SetFunction(Linear)
-    LinearRegression.SetVariables({"Gradient": 5.,
+    LinearRegression.SetVariables({"Gradient": 16.,
                                    "Offset": 10.})
-    popt, report, fits, pcov = FitModel(CalibrationData, LinearRegression)
-    Labels = {"Title": "Calibration for:\t" + Spectrum.Reference,
+    try:
+        popt, report, fits, pcov = FitModel(CalibrationData, LinearRegression)
+        Labels = {"Title": "Calibration for:    " + Spectrum.Reference,
               "X Label": "Pixel speed",
               "Y Label": "Oxygen atom speed",
               }
-    PlotData(fits, Labels)
+        PlotData(fits, Labels)
+    except TypeError:
+        print " Could not automatically fit data. Please try it manually. "
+        report = 0.
+    finally:
+        return report, fits
+
 
 def AddNoise(Y, DampFactor=0.5):
     """
@@ -670,6 +680,19 @@ def LoadSpectrum(File, CalConstant=1.):
     DataFrame = DataFrame.dropna(axis=0)                          # removes all NaN values
     return DataFrame
 
+def DatabaseSpectrum(Database, Reference):
+    Data = NT.LoadReference(Database, Reference)
+    Filename = raw_input("Please specify which spectrum to load.")
+    SelectedData = Data[Filename]
+    DataFrame = pd.DataFrame(data=SelectedData[:,2],
+                             index=SelectedData[:,1],
+                             columns=["Y Range"])
+    return DataFrame
+
+def TDLWavenumber(DataFrame):
+    Wavenumber = 2e7 / DataFrame.index + 1e7 / (1064.464)
+    DataFrame.index = Wavenumber
+
 def GenerateJComb(DataFrame, TransitionEnergies, Offset=1.3, Teeth=0.2, SelectJ=10):
     """ Function for generating a rotational comb spectrum as an annotation
     Not elegant, but it works!
@@ -704,7 +727,7 @@ def PickleSpectra(DataBase):
 			pass
 	NT.SaveObject(PickleDictionary, DataBase)
 
-def PlotData(DataFrame, Labels=None, Interface="pyplot"):
+def PlotData(DataFrame, Labels=None, Legend=True, Interface="pyplot"):
     """ A themed data plotting routine. Will use either matplotlib or
     bokeh to plot everything in an input dataframe, where the index is
     the X axis.
@@ -716,7 +739,9 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
         Colours = brewer["Spectral"][NCols]                   # Set colours depending on how many
     Headers = list(DataFrame.columns.values)                  # Get the column heads
     if Interface == "pyplot":                                 # Use matplotlib library
-        plt.figure(figsize=(12,6))
+        fig = plt.figure(figsize=(12,6))
+        #plt.axes(frameon=True)
+        ax = fig.gca()
         if Labels != None:
             try:                                              # Unpack whatever we can from Labels
                 plt.xlabel(Labels["X Label"], fontsize=18.)
@@ -727,20 +752,22 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
             except KeyError:                    # Will ignore whatever isn't given in dictionary
                 pass
         for index, Data in enumerate(DataFrame):
-            scaling = np.sqrt(len(Data))
+            scaling = np.sqrt(len(Data))           # the marker size scales to number of datapoints
             plt.scatter(DataFrame.index, 
                         DataFrame[Data],           # Plots with direct reference
                         s=40. * scaling,
                         alpha=0.3,
-                        label=None,
-                        color=Colours[index])     # Aesthetics with index
+                        label=None,)
+                        #color=Colours[index])     # Aesthetics with index
             plt.plot(DataFrame.index,
                      DataFrame[Data],           # Plots with direct reference
-                     alpha=0.6,
+                     alpha=0.8,
                      antialiased=True,
-                     color=Colours[index],
+                     #color=Colours[index],
                      label=Headers[index])     # Aesthetics with index
-        plt.legend(ncol=2, loc=1)
+        if Legend is True:
+            plt.legend(ncol=2, loc=0)
+        ax.grid()
         plt.show()
     elif Interface == "bokeh":                                # Use bokeh library
         tools = "pan, wheel_zoom, box_zoom, reset, resize, hover"

@@ -192,7 +192,7 @@ def LoadDatabase(Database):
         exit()
     return Temp
 
-def LoadReference(Database, Reference):
+def LoadReference(Database, Reference, Verbose=True):
     """ Used to retrieve a reference from a database.
         Returns all of the data in a dictionary associated 
         with a logbook reference.
@@ -200,6 +200,8 @@ def LoadReference(Database, Reference):
     Dictionary = dict()
     for Key in Database[Reference].keys():
         Dictionary[Key] = Database[Reference][Key][...]
+    print Reference + " contains the following keys:"
+    print Dictionary.keys()
     return Dictionary
 
 def AddDatabaseEntry(Database, File):
@@ -208,7 +210,7 @@ def AddDatabaseEntry(Database, File):
     if Reference not in Database.keys():         # See if there's already a group
         Database.create_group("/" + Reference)   # in the database, if not create it
     try:
-        Database[Reference].create_dataset(StripExtension(File),    # Load the data
+        Database[Reference].create_dataset(File,    # Load the data
                                            data=np.fromfile(File),  # into database
                                            compression="gzip",      # and compress it
                                            compression_opts=9

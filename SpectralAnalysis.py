@@ -7,7 +7,7 @@ import pandas as pd
 import NotebookTools as NT
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.style.use('seaborn-pastel')
+matplotlib.style.use(['fivethirtyeight', 'seaborn-pastel', ])
 from scipy import constants
 import os
 import peakutils
@@ -66,11 +66,15 @@ class Spectrum:
         self.PumpWavelength = 0.
         self.ProbeWavelength = 0.
         self.Comments = ""
-        if File != None:
-            self.Data = LoadSpectrum(File, CalConstant)
-        if Reference != None:                       # If we give it a logbook reference
+        if Reference is not None:                       # If we give it a logbook reference
             self.Reference = Reference
+        self.Labels = dict()
+        if File is not None:
+            self.Data = LoadSpectrum(File, CalConstant)
+            self.PlotLabels()                       # Only set up plotlabels when we have data
+
         Spectrum.instances.append(self)
+
     def CalibrateWavelengths(self, Wavelengths):
         """ Wavelengths given in as 2-tuple list
         and sets the Dataframe index to the calibrated
@@ -79,58 +83,15 @@ class Spectrum:
         NData = len(self.Data.index)
         NewAxis = np.linspace(num=NData, *Wavelengths)
         self.Data.index = NewAxis
+
+    ###################################### Spectrum I/O ######################################
+
     def AddData(self, NewData, Name):
         self.Data[Name] = NewData
+
     def DeleteData(self, Name):
         del self.Data[Name]
-    def ReadBogScan(self, File):
-        """ Special function for reading data files from
-        BogScan
-        """
-        DataFrame = pd.read_csv(File, delimiter="\t", header=None)
-        if DataFrame[1].sum > 0. == True:                   # If we've got calibrated wavelengths
-            X = np.array(DataFrame[1])
-            print " Using calibrated wavelengths"
-        else:
-            X = np.array(DataFrame[0])
-            print " Using bogscan wavelengths"
-        if DataFrame[2].sum > -100. == True:                # if the axis is negative
-            Y = np.array(DataFrame[2])                      # I like plotting positive!
-        else:
-            Y = -np.array(DataFrame[2])
-        NewDataFrame = FormatData(X, Y)
-        self.Data = NewDataFrame
-    def WidgetPlot(self):
-        self.PlotWidget = IW.PlotContainerGUI(self.Data)
-        try:
-            self.PlotWidget.FigureSetup.PlotTitle.value = self.Reference
-        except AttributeError:
-            pass
-        self.PlotWidget.UpdatePlot(1)   # Random input to make it work
-    def Plot(self, Column="Y Range", Labels=None, Interface="pyplot"):
-        self.PlotLabels(Labels)
-        try:
-            self.Labels["Title"] = self.Reference
-        except AttributeError:
-            pass
-        Target = FormatData(self.Data.index, np.array(self.Data[Column]))
-        PlotData(Target, self.Labels, Interface)
-    def PlotAll(self, Labels=None, Interface="pyplot"):
-        self.PlotLabels(Labels)                     # Initialise labels
-        try:
-            self.Labels["Title"] = self.Reference
-        except AttributeError:                            # Give up if we never gave it a logbook
-            pass
-        PlotData(self.Data, self.Labels, Interface)
-    def PlotLabels(self, Labels=None):
-        if Labels == None:                          # use default labels
-            Labels = {"X Label": "X Axis",
-                      "Y Label": "Y Axis",
-                      "Title": " ",
-                      "X Limits": [min(self.Data.index), max(self.Data.index)],
-                      "Y Limits": [min(self.Data["Y Range"]), max(self.Data["Y Range"])],
-                     }
-        self.Labels = Labels
+
     def ExportData(self, CustomSuffix=False, Suffix=None):
         try:
             os.mkdir("DataExport")
@@ -156,6 +117,7 @@ class Spectrum:
                 FilePath = "./DataExport/" + Reference + Suffix
         self.Data.to_csv(FilePath)
         print " File saved to:\t" + FilePath
+
     def ExportFits(self, Suffix="_fit.csv"):
         try:
             os.mkdir("FittingResults")
@@ -167,6 +129,67 @@ class Spectrum:
             Reference = raw_input(" No reference found, give me a name.")
             self.FitResults.to_csv("./FittingResults/" + Reference + Suffix)
             print " File saved to:\t" + Reference + Suffix
+
+    def ReadBogScan(self, File):
+        """ Special function for reading data files from
+        BogScan
+        """
+        DataFrame = pd.read_csv(File, delimiter="\t", header=None)
+        if DataFrame[1].sum > 0. == True:                   # If we've got calibrated wavelengths
+            X = np.array(DataFrame[1])
+            print " Using calibrated wavelengths"
+        else:
+            X = np.array(DataFrame[0])
+            print " Using bogscan wavelengths"
+        if DataFrame[2].sum > -100. == True:                # if the axis is negative
+            Y = np.array(DataFrame[2])                      # I like plotting positive!
+        else:
+            Y = -np.array(DataFrame[2])
+        NewDataFrame = FormatData(X, Y)
+        self.Data = NewDataFrame
+
+    ###################################### Plotting ######################################
+
+    def WidgetPlot(self):
+        self.PlotWidget = IW.PlotContainerGUI(self.Data)
+        try:
+            self.PlotWidget.FigureSetup.PlotTitle.value = self.Reference
+        except AttributeError:
+            pass
+        self.PlotWidget.UpdatePlot(1)   # Random input to make it work
+
+    def Plot(self, Column="Y Range", Labels=None, Interface="pyplot"):
+        self.PlotLabels()
+        if Labels is not None:
+            self.SetLabels(Labels)
+        Target = FormatData(self.Data.index, np.array(self.Data[Column]))
+        PlotData(Target, self.Labels, Interface)
+
+    def PlotAll(self, Labels=None, Interface="pyplot"):
+        self.PlotLabels()
+        if Labels is not None:
+            self.SetLabels(Labels)
+        PlotData(self.Data, self.Labels, Interface)
+
+    def PlotLabels(self):
+        Labels = {"X Label": "X Axis",
+                      "Y Label": "Y Axis",
+                      "Title": self.Reference,
+                      "X Limits": [min(self.Data.index), max(self.Data.index)],
+                      "Y Limits": [min(self.Data["Y Range"]), max(self.Data["Y Range"]) + max(self.Data["Y Range"]) * 0.1],
+                     }
+        self.SetLabels(Labels)
+
+    def SetLabels(self, Labels):
+        """ For setting the labels for a plot 
+            If done this way, we can keep whatever is already set
+            unless changed.
+        """
+        for Key in Labels:
+            self.Labels[Key] = Labels[Key]
+
+    ###################################### Analysis ######################################
+
     def Fit(self, Model, Column="Y Range", Interface="pyplot", Verbose=True):
         """ Calls the FitModel function to fit the Data contained in this
         instance.
@@ -193,6 +216,7 @@ class Spectrum:
         except RuntimeError:
             print ''' No data column eligible for fitting/"Y Range" doesn't exist. '''
             print ''' You may need to repack the data manually using FormatData. '''
+
     def DetectPeaks(self, Threshold=0.3, MinimumDistance=30.):
         """ Calls the peak finding function from peakutils that will
         sniff up peaks in a spectrum. This class method will then
@@ -202,6 +226,7 @@ class Spectrum:
         self.Peaks = {"Peak Indices": PeakIndices,
                       "Threshold": Threshold,
                       "Minimum Distance": MinimumDistance}
+
     def Smooth(self, WindowSize=5, Column="Y Range"):
         """ Smooths the experimental data using a Svatizky-Golay filter
             with the specified window size.
@@ -210,6 +235,7 @@ class Spectrum:
             self.Data[Column + "-Smoothed"] = np.array(NT.SGFilter(self.Data[Column], WindowSize))
         except KeyError:
             print " No column " + Column + " found in DataFrame."
+
     def BootstrapAnalysis(self, Model, DampFactor=0.5, Trials=100):
         """ Routine that will take a Spectral object and
             perform Bootstrap analysis: will generate synthetic data
@@ -241,6 +267,8 @@ class Spectrum:
         self.BootstrapReport = self.BootstrapResults.describe()
         self.BootstrapReport
         print " Finished analysis. Check object BootstrapReport"
+
+###################################################################################################
 
 class Model:
     """ Class for fitting models and functions. Ideally, I'll have a
@@ -699,12 +727,20 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
             except KeyError:                    # Will ignore whatever isn't given in dictionary
                 pass
         for index, Data in enumerate(DataFrame):
-            plt.scatter(DataFrame.index, DataFrame[Data],           # Plots with direct reference
-                     color=Colours[index])     # Aesthetics with index
-            plt.plot(DataFrame.index, DataFrame[Data],           # Plots with direct reference
+            scaling = np.sqrt(len(Data))
+            plt.scatter(DataFrame.index, 
+                        DataFrame[Data],           # Plots with direct reference
+                        s=40. * scaling,
+                        alpha=0.3,
+                        label=None,
+                        color=Colours[index])     # Aesthetics with index
+            plt.plot(DataFrame.index,
+                     DataFrame[Data],           # Plots with direct reference
+                     alpha=0.6,
                      antialiased=True,
-                     color=Colours[index], label=Headers[index])     # Aesthetics with index
-        plt.legend(ncol=2, loc=9)
+                     color=Colours[index],
+                     label=Headers[index])     # Aesthetics with index
+        plt.legend(ncol=2, loc=1)
         plt.show()
     elif Interface == "bokeh":                                # Use bokeh library
         tools = "pan, wheel_zoom, box_zoom, reset, resize, hover"

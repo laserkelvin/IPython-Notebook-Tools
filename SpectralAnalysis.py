@@ -7,7 +7,7 @@ import pandas as pd
 import NotebookTools as NT
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.style.use(['seaborn-pastel', ])
+from matplotlib import cm
 from scipy import constants
 import os
 import peakutils
@@ -26,6 +26,12 @@ import InteractiveWidgets as IW
 # routines from FittingRoutines.py
 # My plan is to make FittingRoutines obsolete, as it has A LOT of poorly written
 # routines.
+
+###################################################################################################
+
+""" General Plot settings """
+
+matplotlib.style.use(['seaborn-pastel', 'fivethirtyeight'])      # Theme
 
 ###################################################################################################
 
@@ -118,9 +124,9 @@ class Spectrum:
         self.Data.to_csv(FilePath)
         print " File saved to:\t" + FilePath
 
-    def KERfromPES(self, File, Mass):
+    def KERfromPES(self, File, Mass, Units="cm"):
         PES = LoadSpectrum(File, self.CalibrationConstant)
-        self.Data = ConvertSpeedDistribution(PES, Mass)
+        self.Data = ConvertSpeedDistribution(PES, Mass, Units=Units)
 
     def ExportFits(self, Suffix="_fit.csv"):
         try:
@@ -272,6 +278,12 @@ class Spectrum:
         self.BootstrapReport
         print " Finished analysis. Check object BootstrapReport"
 
+    def IntegrateColumn(self, Column="Y Range"):
+        """ Return the integral of a column """
+        X = self.Data.index
+        Y = np.array(self.Data[Column])
+        return np.trapz(Y, X)
+
 ###################################################################################################
 
 class Model:
@@ -343,13 +355,10 @@ def ConvertSpeedDistribution(DataFrame, Mass, Units="cm"):
     as input, and returns the kinetic energy dataframe with the
     index as the KER, and "Y Range" as P(E).
     """
-    if Units == "cm":        # 1/cm
-        Conversion = 83.59
-    if Units == "kJ":        # kJ/mol
-        Conversion = 1.
-    if Units == "eV":        # eV
-        Conversion = .0103636
-    KER = (np.square(DataFrame.index) * (Mass / 1000.) / 2000.) * Conversion
+    Conversion = {"cm": 83.59,           # Dictionary of unit conversion from
+                  "kJ": 1.,              # kJ/mol to 1/cm and eV
+                  "eV": 0.0103636}
+    KER = (np.square(DataFrame.index) * (Mass / 1000.) / 2000.) * Conversion[Units]
     PE = DataFrame["Y Range"].values / (Mass / 1000. * DataFrame.index)
     PE = [0. if Value < 0. else Value for Value in PE ]           # set negative values to zero
     KERDataFrame = pd.DataFrame(data=PE, index=KER, columns=["Y Range"])
@@ -608,6 +617,26 @@ def AddNoise(Y, DampFactor=0.5):
         Iterator.iternext()                         # Next iteration of loop
     return NewData
 
+def LinearRegression(DataFrame, Columns=None, Labels=None):
+    RegressionReport = dict()
+    LinearModel = Model("Linear regression model")       # Set up regression model
+    if Columns is None:
+        Columns = list(DataFrame.keys())            # Default is regress all columns
+    with NT.suppress_stdout():
+        # Supress output
+        LinearModel.SetFunction(Linear)
+        for Data in Columns:
+            if "-Regression" in Data:         # No need to regress more than once!
+                pass
+            else:
+                Opt, Report, Fits, Cov = FitModel(DataFrame, Model=LinearModel, Column=Data, Verbose=False)
+                DataFrame[Data + "-Regression"] = Linear(DataFrame.index, *Opt)    # Plot the curves
+                RegressionReport[Data] = Report
+                if (Data + "-Regression") not in Columns:
+                    Columns.append(Data + "-Regression")
+    fig, ax = PlotData(DataFrame=DataFrame, Columns=Columns, Labels=Labels)
+    return RegressionReport
+
 ###################################################################################################
 
 """ Commonly used base functions """
@@ -626,6 +655,12 @@ def BoltzmannFunction(x, Amplitude, Temperature):
 
 def Linear(x, Gradient, Offset):
     return x * Gradient + Offset
+
+def PriorFunction(x, A, i, j):
+    return A * (x**i) * (1. - x)**j
+
+def SingleExponential(x, Amplitude, Gradient):
+    return Amplitude * np.exp(Gradient * x)
 
 @jit
 def ConvolveArrays(A, B, method="new"):
@@ -727,22 +762,85 @@ def PickleSpectra(DataBase):
 			pass
 	NT.SaveObject(PickleDictionary, DataBase)
 
-def PlotData(DataFrame, Labels=None, Legend=True, Interface="pyplot"):
+def SetupPyplotTypes(Key, Scaling=None, Colours=None, PlotType=None):
+    """ Programatically select the kind of plots we can
+        produce. Use PlotType as input for the kind of
+        plot, and this function will return the appropriate pyplot
+        function as well as a dictionary of settings
+
+        Colours is a dictionary containing the colour of each bar and
+        scatter plot.
+
+        Key is the name of the column in the DataFrame.
+
+        Scaling is a tuple which dynamically scales the size of markers
+        according to the number of data points.
+    """
+    Wrappers = {"scatter": plt.scatter,         # dictionary of pyplot functions
+                "bar": plt.bar,
+                "line": plt.plot}
+    DefaultSettings = {"scatter": {"s": 150. * Scaling,  # settings for each
+                                   "alpha": 0.7,        # kind of plot
+                                   "label": Key,
+                                   "c": Colours[Key]
+                                  },
+                        "line": {"alpha": 0.8,
+                                 "antialiased": True,
+                                 "label": Key},
+                        "bar": {"alpha": 0.5,
+                                "align": "center",
+                                "color": Colours[Key],
+                                "label": Key}
+                       }
+    """ Set up the initial default settings before modifying """
+    if PlotType == None:                        # default plot type is scatter
+        Settings = DefaultSettings["scatter"]
+    else:
+        Settings = DefaultSettings[PlotType]
+    return Wrappers[PlotType], Settings
+
+def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplot", PlotTypes=None):
     """ A themed data plotting routine. Will use either matplotlib or
     bokeh to plot everything in an input dataframe, where the index is
     the X axis.
+
+    PlotTypes is a dictionary input with the same keys as the DataFrame
+    columns.
+
+    Labels is a dictionary containing the axis plot settings.
     """
-    NCols = len(DataFrame.columns)                            # Get the number of columns
-    if NCols <= 2:
-        Colours = ["blue", "red"]
-    else:
-        Colours = brewer["Spectral"][NCols]                   # Set colours depending on how many
-    Headers = list(DataFrame.columns.values)                  # Get the column heads
+    if Columns is None:
+        Columns = DataFrame.keys()
+    Headers = DataFrame.keys()                  # Get the column heads
     if Interface == "pyplot":                                 # Use matplotlib library
         fig = plt.figure(figsize=(12,6))
+        plt.margins(0.2)                                # Margins from the edges of the plot
         #plt.axes(frameon=True)
         ax = fig.gca()
-        if Labels != None:
+
+        """ Set up the kinds of plots that will be displayed.
+            Plots is a dictionary that holds the kind of plot for each
+            column in DataFrame.
+        """
+        Plots = dict()
+        for Key in Columns:
+            Exists = NT.CheckString(Key, ["Model", "Regression", "-", "Fit"])
+            if Exists is True:
+                Plots[Key] = "line"        # if the data is actually a fitted model
+            elif Exists is False:
+                Plots[Key] = "scatter"     # Initialise default plots to scatter
+
+        """ If there are specific plot types requested,
+            update the dictionary.
+        """
+        if PlotTypes is not None:           # Only update if there are
+            for Key in PlotTypes:          # specified plot types
+                Plots[Key] = PlotTypes[Key]
+        else:
+            pass
+
+        """ Set up the plot labels for the axes. """
+        if Labels is not None:
             try:                                              # Unpack whatever we can from Labels
                 plt.xlabel(Labels["X Label"], fontsize=18.)
                 plt.ylabel(Labels["Y Label"], fontsize=18.)
@@ -751,26 +849,42 @@ def PlotData(DataFrame, Labels=None, Legend=True, Interface="pyplot"):
                 plt.ylim(Labels["Y Limits"])
             except KeyError:                    # Will ignore whatever isn't given in dictionary
                 pass
-        for index, Data in enumerate(DataFrame):
-            scaling = np.sqrt(len(Data))           # the marker size scales to number of datapoints
-            plt.scatter(DataFrame.index, 
-                        DataFrame[Data],           # Plots with direct reference
-                        s=40. * scaling,
-                        alpha=0.3,
-                        label=None,)
-                        #color=Colours[index])     # Aesthetics with index
-            plt.plot(DataFrame.index,
-                     DataFrame[Data],           # Plots with direct reference
-                     alpha=0.8,
-                     antialiased=True,
-                     #color=Colours[index],
-                     label=Headers[index])     # Aesthetics with index
+
+        """ Set up the colours used for scatter and bar plots """
+        Colours = dict()
+        ColourCounts = 0
+        for Key in Plots:                                # Count the number of bar/scatter plots
+            Colours[Key] = "blue"
+            if Plots[Key] is "scatter" or "bar":
+                ColourCounts = ColourCounts + 1
+        ColourMap = cm.Set1(np.linspace(0., 1., ColourCounts))   # Interpolate colours
+        for Index, Key in enumerate(Plots):                      # Assign colour to plot
+            Colours[Key] = ColourMap[Index]
+
+        Scaling = 1. / ((DataFrame.shape[0]))**(1. / 12.)   # Scale the marker sizes to number of elements
+        """ Loop over each column in the DataFrame. """
+        for Key in Columns:
+            """ Determine what kind of plot is needed, and the
+                settings to go with it.
+            """
+            PlotFunction, PlotSettings = SetupPyplotTypes(Key=Key,
+                                                          Scaling=Scaling,
+                                                          PlotType=Plots[Key],
+                                                          Colours=Colours,
+                                                          )
+            PlotFunction(DataFrame.index, DataFrame[Key], **PlotSettings)
         if Legend is True:
             plt.legend(ncol=2, loc=0)
         ax.grid()
         plt.show()
     elif Interface == "bokeh":                                # Use bokeh library
+        NCols = len(DataFrame.columns)                            # Get the number of columns
+        if NCols <= 2:
+            Colours = ["blue", "red"]
+        else:
+            Colours = brewer["Spectral"][NCols]                   # Set colours depending on how many
         tools = "pan, wheel_zoom, box_zoom, reset, resize, hover"
+        ax = None                                             # Not used with Bokeh
         if Labels != None:
             try:                                              # Unpack whatever we can from Labels
                 XLabel = Labels["X Label"]
@@ -778,7 +892,7 @@ def PlotData(DataFrame, Labels=None, Legend=True, Interface="pyplot"):
                 Title = Labels["Title"]
                 XRange = Labels["X Limits"]
                 YRange = Labels["Y Limits"]
-                plot = figure(width=700, height=400,                        # set up the labels
+                fig = figure(width=700, height=400,                        # set up the labels
                               x_axis_label=XLabel, y_axis_label=YLabel,
                               title=Title, tools=tools,
                               x_range=XRange, y_range=YRange)
@@ -786,13 +900,14 @@ def PlotData(DataFrame, Labels=None, Legend=True, Interface="pyplot"):
                 print " Not using labels"
                 pass
         else:
-            plot = figure(width=700, height=400, tools=tools)               # if we have no labels
-        plot.background_fill_color="beige"
+            fig = figure(width=700, height=400, tools=tools)               # if we have no labels
+        fig.background_fill_color="beige"
         for index, Data in enumerate(DataFrame):
-            plot.scatter(x=DataFrame.index, y=DataFrame[Data],
+            fig.scatter(x=DataFrame.index, y=DataFrame[Data],
                       line_width=2, color=Colours[index],
                       legend=Headers[index])
-            plot.line(x=DataFrame.index, y=DataFrame[Data],
+            fig.line(x=DataFrame.index, y=DataFrame[Data],
                       line_width=2, color=Colours[index],
                       legend=Headers[index])
-        show(plot)
+        show(fig)
+    return fig, ax

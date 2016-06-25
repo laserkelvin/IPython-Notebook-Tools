@@ -18,6 +18,26 @@ import h5py
 
 ################## General notebook functions ####################
 
+def CheckString(String, CheckList):
+    """ Will check a String for a set of strings specifed in
+        CheckList. Returns boolean indicating if any of the
+        conditions are satisfied.
+    """
+    Booleans = np.array([Checked in String for Checked in CheckList])
+    if np.sum(Booleans) > 0:
+        Exists = True
+    else:
+        Exists = False
+    return Exists
+
+def PhotonEnergy2NPhoton(Wavelength, Power):
+    """ Convert laser power for a given wavelength
+        and power (in mJ) to number of photons
+    """
+    Energy = (1e7 / Wavelength) / 83.59     # kJ/mol
+    Moles = (Power * 1e-6) / Energy         # Power into kJ
+    return Moles * constants.Avogadro
+
 @contextmanager
 def suppress_stdout():
     """ Will supress the standard output

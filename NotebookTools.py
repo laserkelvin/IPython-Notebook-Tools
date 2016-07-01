@@ -220,8 +220,9 @@ def LoadReference(Database, Reference, Verbose=True):
     Dictionary = dict()
     for Key in Database[Reference].keys():
         Dictionary[Key] = Database[Reference][Key][...]
-    print Reference + " contains the following keys:"
-    print Dictionary.keys()
+    if Verbose is True:
+        print Reference + " contains the following keys:"
+        print Dictionary.keys()
     return Dictionary
 
 def AddDatabaseEntry(Database, File):

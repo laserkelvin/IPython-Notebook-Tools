@@ -125,8 +125,8 @@ class Spectrum:
         print " File saved to:\t" + FilePath
 
     def KERfromPES(self, File, Mass, Units="cm"):
-        PES = LoadSpectrum(File, self.CalibrationConstant)
-        self.Data = ConvertSpeedDistribution(PES, Mass, Units=Units)
+        self.PES = LoadSpectrum(File, self.CalibrationConstant)
+        self.Data = ConvertSpeedDistribution(self.PES, Mass, Units=Units)
 
     def ExportFits(self, Suffix="_fit.csv"):
         try:
@@ -139,6 +139,30 @@ class Spectrum:
             Reference = raw_input(" No reference found, give me a name.")
             self.FitResults.to_csv("./FittingResults/" + Reference + Suffix)
             print " File saved to:\t" + Reference + Suffix
+
+    def LoadDatabaseSpectrum(self, Database, Reference, Bogscan=False):
+        Data = NT.LoadReference(Database, Reference, Verbose=False)
+        Options = dict()
+        if len(Data.keys()) != 1:       # Only ask if there's more than one file
+            for Index, Key in enumerate(Data.keys()):
+                Options[Index] = Key
+            print Options
+            Selector = int(raw_input(" Please specify which key to load"))
+            Filename = Options[Selector]
+        else:
+            Filename = Data.keys()[0]
+        self.Data = pd.DataFrame(data=Data[Filename])
+        if Bogscan is True:
+            if np.float(self.Data[1].sum()) > 0 is not True:    # Why does this not work
+                self.Data.index = np.array(self.Data[1])
+            else:
+                self.Data.index = np.array(self.Data[0])
+            del self.Data[0]
+            del self.Data[1]
+            del self.Data[3]
+            self.Data.columns = ["Y Range"]
+            if self.Data["Y Range"].sum() > -10. is True:
+                self.Data["Y Range"] = self.Data["Y Range"]     # Make intensity positive
 
     def ReadBogScan(self, File):
         """ Special function for reading data files from
@@ -175,18 +199,22 @@ class Spectrum:
         Target = FormatData(self.Data.index, np.array(self.Data[Column]))
         PlotData(DataFrame=Target, Labels=self.Labels, Interface=Interface, Legend=Legend)
 
-    def PlotAll(self, Labels=None, Legend=True, Interface="pyplot"):
+    def PlotAll(self, Labels=None, Legend=True, Interface="pyplot", PlotTypes=None):
         self.PlotLabels()
         if Labels is not None:
             self.SetLabels(Labels)
-        PlotData(DataFrame=self.Data, Labels=self.Labels, Interface=Interface, Legend=Legend)
+        if PlotTypes is not None:
+            self.PlotTypes = PlotTypes
+        PlotData(DataFrame=self.Data, Labels=self.Labels, Interface=Interface, Legend=Legend, PlotTypes=PlotTypes)
 
-    def PlotLabels(self):
+    def PlotLabels(self, Column=None):
+        if Column is None:
+            Column = self.Data.keys()[0]       # if no data is used to initialise
         Labels = {"X Label": "X Axis",
                       "Y Label": "Y Axis",
                       "Title": self.Reference,
                       "X Limits": [min(self.Data.index), max(self.Data.index)],
-                      "Y Limits": [min(self.Data["Y Range"]), max(self.Data["Y Range"]) + max(self.Data["Y Range"]) * 0.1],
+                      "Y Limits": [min(self.Data[Column]), max(self.Data[Column]) + max(self.Data[Column]) * 0.1],
                      }
         self.SetLabels(Labels)
 
@@ -245,6 +273,13 @@ class Spectrum:
             self.Data[Column + "-Smoothed"] = np.array(NT.SGFilter(self.Data[Column], WindowSize))
         except KeyError:
             print " No column " + Column + " found in DataFrame."
+
+    def NormaliseColumn(self, Columns=["Y Range"]):
+        for Column in Columns:
+            if "-Normalised" not in Column:
+                NormaliseColumn(self.Data, Column=Column)
+            else:
+                pass
 
     def BootstrapAnalysis(self, Model, DampFactor=0.5, Trials=100):
         """ Routine that will take a Spectral object and
@@ -320,7 +355,7 @@ class Model:
     def NewSetFunction(self, FunctionList, Verbose=True):
         self.FunctionList = FunctionList
         self.VariableDict = OrderedDict()
-        for Function in self.FunctionList:
+        for Function in FunctionList:
             self.VariableDict[Function.func_name] = OrderedDict.fromkeys(inspect.getargspec(Function)[0])
             try:
                 del self.VariableDict[Function.func_name]["x"]
@@ -369,7 +404,7 @@ def ConvertSpeedDistribution(DataFrame, Mass, Units="cm"):
 def NormaliseColumn(DataFrame, Column="Y Range"):
     """ Routine to normalise a column in pandas dataframes
     """
-    DataFrame[Column] = DataFrame[Column] / np.max(DataFrame[Column])
+    DataFrame[Column + "-Normalised"] = DataFrame[Column] / np.max(DataFrame[Column])
 
 def Dict2List(Dictionary):
     List = [Dictionary[Item] for Item in Dictionary]
@@ -523,7 +558,6 @@ class LeastSqObject:
         self.OptimisedParameters, self.CovarianceMatrix = leastsq(self.ResidualFunction,
                                                                   self.InitialParameters,
                                                                   args=(self.XData, self.YData))
-
 
 def LeastSqFit(ResidualFunction, InitialParameters, DataFrame, Column="Y Range"):
     """ Function for using scipy.optimize.leastsq to generically fit
@@ -797,6 +831,10 @@ def SetupPyplotTypes(Key, Scaling=None, Colours=None, PlotType=None):
         Settings = DefaultSettings["scatter"]
     else:
         Settings = DefaultSettings[PlotType]
+    try:
+        print Settings[PlotType]["c"]
+    except KeyError:
+        pass
     return Wrappers[PlotType], Settings
 
 def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplot", PlotTypes=None):
@@ -824,7 +862,7 @@ def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplo
         """
         Plots = dict()
         for Key in Columns:
-            Exists = NT.CheckString(Key, ["Model", "Regression", "-", "Fit"])
+            Exists = NT.CheckString(Key, ["Model", "Regression", "Fit", "Smoothed"])
             if Exists is True:
                 Plots[Key] = "line"        # if the data is actually a fitted model
             elif Exists is False:

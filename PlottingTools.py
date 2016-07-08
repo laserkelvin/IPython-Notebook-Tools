@@ -72,7 +72,7 @@ def GenerateColours(Columns, Colormap=["div", "Spectral"]):
 
 def GenerateColourMap(Data, Colormap=["div", "Spectral"]):
     """ Generate a linearly spaced colourmap """
-    IntensityValues = np.linspace(np.min(Data), np.max(Data), 10)
+    IntensityValues = np.linspace(0., 1., 10)
     Colors = cl.scales["10"][Colormap[0]][Colormap[1]]
     Map = []
     for Index, Value in enumerate(IntensityValues):

@@ -948,4 +948,10 @@ def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplo
                       line_width=2, color=Colours[index],
                       legend=Headers[index])
         show(fig)
+    elif Interface == "plotly":
+        import PlottingTools as PT 
+        PT.PlotMarkersDataFrame(DataFrame=DataFrame,
+                                Columns=Columns,
+                                Labels=Labels)
+        fig, ax = (None, None)
     return fig, ax

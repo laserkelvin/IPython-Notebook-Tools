@@ -72,7 +72,7 @@ def GenerateColours(Columns, Colormap=["div", "Spectral"]):
 
 def GenerateColourMap(Data, Colormap=["div", "Spectral"]):
     """ Generate a linearly spaced colourmap """
-    IntensityValues = np.linspace(0., 1., 10)
+    IntensityValues = np.linspace(0., 1., 10)        # Z scale cmap is normalised
     Colors = cl.scales["10"][Colormap[0]][Colormap[1]]
     Map = []
     for Index, Value in enumerate(IntensityValues):
@@ -135,7 +135,7 @@ def PlotMarkersDataFrame(DataFrame, Columns=None, CustomPlotTypes=None, Labels=N
     for Key in Columns:
         Exists = NT.CheckString(Key, ["Model", "Regression", "Fit", "Smoothed"])
         if Exists is True:                            # If the column is any of the above types
-            Plots[Key] = "line"
+            PlotTypes[Key] = "line"
         else:
             PlotTypes[Key] = "markers"                # set all default plots to markers
         if CustomPlotTypes is not None:               # if we specify the plot type,
@@ -171,11 +171,10 @@ def PlotMarkersDataFrame(DataFrame, Columns=None, CustomPlotTypes=None, Labels=N
                                   **PlotSettings[Plot])
                     )
     iplot(dict(data=Plots, layout=Layout))
-    return Plots, Layout
 
 def SurfacePlot(DataFrame, Colourmap=["div", "Spectral"], Title=None):
-    ZData = DataFrame.as_matrix()
-    Map = GenerateColourMap(ZData)
+    ZData = DataFrame.as_matrix()                           # convert dataframe to matrix
+    Map = GenerateColourMap(ZData)                          # generate a colour map
     LayoutSettings = {"title": Title,
                       "autosize": False,
                       "width": 600,

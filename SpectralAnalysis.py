@@ -32,6 +32,7 @@ import InteractiveWidgets as IW
 """ General Plot settings """
 
 matplotlib.style.use(['seaborn-pastel', 'fivethirtyeight'])      # Theme
+D3State = False
 
 ###################################################################################################
 
@@ -681,6 +682,17 @@ def LinearRegression(DataFrame, Columns=None, Labels=None):
     fig, ax = PlotData(DataFrame=DataFrame, Columns=Columns, Labels=Labels)
     return RegressionReport
 
+def AnisotropyAveraging(Spectrum, PixelRange=[165,195]):
+    """ Calculates the average anisotropy value for a range of pixels
+        in an angular distribution.
+    """
+    BetaValues = []                                   # list that stores the beta values
+    for Pixel in range(PixelRange[0], PixelRange[1]):                   # loop over pixels
+        PixelValue = Spectrum.Data.index[NT.find_nearest(Spectrum.Data.index, Pixel)]
+        BetaValues.append(Spectrum.Data["Beta"][PixelValue])       # find the beta value at a given pixel
+    BetaValues = np.array(BetaValues)
+    return np.average(BetaValues, axis=0), np.std(BetaValues, axis=0)
+
 ###################################################################################################
 
 """ Commonly used base functions """
@@ -861,7 +873,7 @@ def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplo
         Columns = DataFrame.keys()
     Headers = DataFrame.keys()                  # Get the column heads
     if Interface == "pyplot":                                 # Use matplotlib library
-        fig = plt.figure(figsize=(12,6))
+        fig = plt.figure(figsize=(12,8))
         plt.margins(0.2)                                # Margins from the edges of the plot
         #plt.axes(frameon=True)
         ax = fig.gca()
@@ -906,7 +918,7 @@ def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplo
             Colours[Key] = "blue"
             if Plots[Key] is "scatter" or "bar":
                 ColourCounts = ColourCounts + 1
-        ColourMap = cm.Set1(np.linspace(0., 1., ColourCounts))   # Interpolate colours
+        ColourMap = cm.Spectral(np.linspace(0, 1, ColourCounts))   # Interpolate colours
         for Index, Key in enumerate(Plots):                      # Assign colour to plot
             Colours[Key] = ColourMap[Index]
 
@@ -967,3 +979,10 @@ def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplo
                                 Labels=Labels)
         fig, ax = (None, None)
     return fig, ax
+
+def ToggleD3(D3State):
+    import mpld3
+    if D3State is False:
+        mpld3.enable_notebook()
+    elif D3State is True:
+        mpld3.disable_notebook()

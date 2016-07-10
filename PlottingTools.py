@@ -40,17 +40,22 @@ def GenerateColours(Columns, Colormap=["div", "Spectral"]):
                 contrast between max and min data,
                 effectively to show how the data
                 deviates from the norm.
+        ['RdYlBu','Spectral','RdYlGn','PiYG','PuOr','PRGn','BrBG','RdBu','RdGy']
 
         "seq" - Sequential
                 When plotting data that is gradually
                 changing smoothly. Should be used
                 to map quanitative data.
+        ['Reds','YlOrRd','RdPu','YlOrBr','Greens','YlGnBu','GnBu','BuPu','Greys',
+         'Oranges','OrRd','BuGn','PuBu','PuRd','Blues','PuBuGn','YlGn','Purples']
 
         "qual" - Qualitative
                  When plotting data that does not
                  depend on intensity, rather to
                  highlight the different types of
                  data.
+
+        ['Pastel2', 'Paired', 'Pastel1', 'Set1', 'Set2', 'Set3', 'Dark2', 'Accent']
 
         Returns a dictionary with keys as columns.
     """
@@ -72,8 +77,8 @@ def GenerateColours(Columns, Colormap=["div", "Spectral"]):
 
 def GenerateColourMap(Data, Colormap=["div", "Spectral"]):
     """ Generate a linearly spaced colourmap """
-    IntensityValues = np.linspace(0., 1., 10)        # Z scale cmap is normalised
-    Colors = cl.scales["10"][Colormap[0]][Colormap[1]]
+    IntensityValues = np.linspace(0., 1., 5)        # Z scale cmap is normalised
+    Colors = cl.scales["5"][Colormap[0]][Colormap[1]]
     Map = []
     for Index, Value in enumerate(IntensityValues):
         Map.append([Value, Colors[Index]])
@@ -113,11 +118,30 @@ def DefaultLayoutSettings():
                               },
                       "plot_bgcolor": 'rgb(229,229,229)',     # bkg colour
                       "autosize": False,                      # set manual size
-                      "width": 800,
+                      "width": 950,
                       "height": 500,
                       
                      }
     return LayoutSettings
+
+def FilterPlotTypes(Columns, PlotTypes, CustomPlotTypes):
+    CheckList = ["Model", "Regression", "Fit", "Smoothed", "Stick Spectrum"]
+    for Key in Columns:
+        if (type(Key) is str) == True:
+            Exists = NT.CheckString(Key, CheckList)
+            if Exists is True:                            # If the column is any of the above types
+                PlotTypes[Key] = "line"
+            else:
+                PlotTypes[Key] = "markers"                # set all default plots to markers
+        else:
+            for Key in Columns:
+                PlotTypes[Key] = "markers"
+        if CustomPlotTypes is not None:               # if we specify the plot type,
+            try:
+                PlotTypes[Key] = CustomPlotTypes[Key] # then make it so.
+            except KeyError:
+                pass
+    return PlotTypes
 
 ###############################################################################
 
@@ -129,22 +153,13 @@ def PlotMarkersDataFrame(DataFrame, Columns=None, CustomPlotTypes=None, Labels=N
     if Columns is None:
         Columns = list(DataFrame.keys())              # if nothing specified, plot them all
     
-    """ Initialise plotting settings """
-    Colors = GenerateColours(Columns)
     PlotTypes = dict()
-    for Key in Columns:
-        Exists = NT.CheckString(Key, ["Model", "Regression", "Fit", "Smoothed"])
-        if Exists is True:                            # If the column is any of the above types
-            PlotTypes[Key] = "line"
-        else:
-            PlotTypes[Key] = "markers"                # set all default plots to markers
-        if CustomPlotTypes is not None:               # if we specify the plot type,
-            try:
-                PlotTypes[Key] = CustomPlotTypes[Key] # then make it so.
-            except KeyError:
-                pass
     PlotSettings = dict()                             # Stores the plot settings for each plot
     Plots = []                                        # list of instances of plotly plots
+
+    """ Initialise plotting settings """
+    Colors = GenerateColours(Columns)                 # Set up colours based on colourmap
+    PlotTypes = FilterPlotTypes(Columns, PlotTypes, CustomPlotTypes)# Check for keys to set default plots
     
     Layout = DefaultLayoutSettings()                  # Generate the default layout
     if Labels is not None:
@@ -162,6 +177,8 @@ def PlotMarkersDataFrame(DataFrame, Columns=None, CustomPlotTypes=None, Labels=N
         elif PlotTypes[Plot] is "line":
             PlotFunction = go.Scatter
             PlotSettings[Plot]["line"]["color"] = Colors[Plot]       # set line colour
+            if Plot == "Stick Spectrum":
+                PlotSettings[Plot]["opacity"] = 0.5                  # make sticks more transparent
         else:
             PlotFunction = go.Scatter
             PlotSettings[Plot]["marker"]["color"] = Colors[Plot]
@@ -171,6 +188,55 @@ def PlotMarkersDataFrame(DataFrame, Columns=None, CustomPlotTypes=None, Labels=N
                                   **PlotSettings[Plot])
                     )
     iplot(dict(data=Plots, layout=Layout))
+
+def XYZPlot(DataFrame, Type="Heatmap", Colourmap=["div","Spectral"], Title=None):
+    """ A general wrapper for three dimensional data.
+        Takes a dataframe and plots the data as xyz.
+
+        Choices are:
+        Heatmap, Contour and Surface.
+    """
+    ZData = DataFrame.as_matrix()
+    if len(Colourmap) == 2:
+        Map = GenerateColourMap(ZData, Colourmap)                    # generate a colour map
+    else:
+        Map = Colourmap
+    XData = DataFrame.index
+    YData = list(DataFrame.keys())
+    LayoutSettings = {"title": Title,
+                      "autosize": False,
+                      "width": 950,
+                      "height": 600,
+                      "plot_bgcolor":"rgb(230,230,230)"
+                      }
+    """ Set up the plot parameters now """
+    Parameters = {"x": XData,
+                  "y": YData,
+                  "z": ZData,
+                  "colorscale": Map,
+                  }
+
+    """ Now set up the plot type specific settings """
+    if Type == "Heatmap":
+        Function = go.Heatmap
+    elif Type == "Contour":
+        Function = go.Contour
+        Parameters["line"] = {"smoothing": 0.7}
+    elif Type == "Surface":
+        Function = go.Surface
+    elif Type == "Scatter":
+        Function = go.Scatter
+        del Parameters["z"]
+        del Parameters["colorscale"]
+        Parameters["marker"] = {"size": 12.,
+                                "color": ZData,
+                                "colorscale": Map,
+                                "showscale": True
+                                }
+
+    Trace = [Function(**Parameters)]
+
+    iplot(dict(data=Trace, layout=LayoutSettings))
 
 def SurfacePlot(DataFrame, Colourmap=["div", "Spectral"], Title=None):
     ZData = DataFrame.as_matrix()                           # convert dataframe to matrix

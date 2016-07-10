@@ -255,12 +255,12 @@ class Spectrum:
             print ''' No data column eligible for fitting/"Y Range" doesn't exist. '''
             print ''' You may need to repack the data manually using FormatData. '''
 
-    def DetectPeaks(self, Threshold=0.3, MinimumDistance=30.):
+    def DetectPeaks(self, Column=None, Threshold=0.3, MinimumDistance=30.):
         """ Calls the peak finding function from peakutils that will
         sniff up peaks in a spectrum. This class method will then
         store that information as an attribute
         """
-        PeakIndices = PeakFinding(self.Data, Threshold, MinimumDistance)
+        PeakIndices = PeakFinding(self.Data, Column, Threshold, MinimumDistance)
         self.Peaks = {"Peak Indices": PeakIndices,
                       "Threshold": Threshold,
                       "Minimum Distance": MinimumDistance}
@@ -578,15 +578,19 @@ def CheckCovariance(CovarianceMatrix, Threshold=1E-2):
         print str(len(ThresholdedElements)) + " elements of covariance matrix larger than\t" + str(Threshold)
         print " Check your privilege!"
 
-def PeakFinding(DataFrame, Threshold=0.3, MinimumDistance=30.):
+def PeakFinding(DataFrame, Column=None, Threshold=0.3, MinimumDistance=30.):
     """ Routine that will sniff out peaks in a spectrum, and fit them with Gaussian functions
     I have no idea how well this will work, but it feels like it's gonna get pretty
     complicated pretty quickly
     """
-    PeakIndices = peakutils.indexes(DataFrame["Y Range"], thres=Threshold, min_dist=MinimumDistance)
+    if Column is None:
+        Column = DataFrame.keys()[0]         # if nothing supplied, use the first column
+        print "No column specified, using " + Column
+    PeakIndices = peakutils.indexes(DataFrame[Column], thres=Threshold, min_dist=MinimumDistance)
     NPeaks = len(PeakIndices)
     print " Found \t" + str(NPeaks) + "\t peaks."
-    StickSpectrum = np.zeros((len(DataFrame["Y Range"])), dtype=float)
+    StickSpectrum = np.zeros((len(DataFrame[Column])), dtype=float)
+    Intensities = []
     for Index in PeakIndices:
         StickSpectrum[Index] = 1.
     DataFrame["Stick Spectrum"] = StickSpectrum
@@ -628,6 +632,12 @@ def VMICalibration(Spectrum):
     finally:
         return report, fits
 
+def DataFrameDistances(DataFrame, PeaksRange=[0,5]):
+    DistancesDataFrame = pd.DataFrame()
+    for PeakNumber in range(PeaksRange[0], PeaksRange[1]):       # Loop over all indices
+        PeakPosition = DataFrame.index[PeakNumber]
+        DistancesDataFrame[PeakNumber] = np.abs(DataFrame.index - PeakPosition)
+    return DistancesDataFrame
 
 def AddNoise(Y, DampFactor=0.5):
     """
@@ -862,11 +872,12 @@ def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplo
         """
         Plots = dict()
         for Key in Columns:
-            Exists = NT.CheckString(Key, ["Model", "Regression", "Fit", "Smoothed"])
-            if Exists is True:
-                Plots[Key] = "line"        # if the data is actually a fitted model
-            elif Exists is False:
-                Plots[Key] = "scatter"     # Initialise default plots to scatter
+            if (type(Key) is str) == True:       # check if header is string, skip if not                       
+                Exists = NT.CheckString(Key, ["Model", "Regression", "Fit", "Smoothed"])
+                if Exists is True:
+                    Plots[Key] = "line"        # if the data is actually a fitted model
+                elif Exists is False:
+                    Plots[Key] = "scatter"     # Initialise default plots to scatter
 
         """ If there are specific plot types requested,
             update the dictionary.
@@ -948,10 +959,11 @@ def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplo
                       line_width=2, color=Colours[index],
                       legend=Headers[index])
         show(fig)
-    elif Interface == "plotly":
+    elif Interface == "plotly":                                # Plotly interface
         import PlottingTools as PT 
         PT.PlotMarkersDataFrame(DataFrame=DataFrame,
                                 Columns=Columns,
+                                CustomPlotTypes=PlotTypes,
                                 Labels=Labels)
         fig, ax = (None, None)
     return fig, ax

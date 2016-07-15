@@ -973,14 +973,14 @@ def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplo
         show(fig)
     elif Interface == "plotly":                                # Plotly interface
         import PlottingTools as PT 
-        PT.PlotMarkersDataFrame(DataFrame=DataFrame,
-                                Columns=Columns,
-                                CustomPlotTypes=PlotTypes,
-                                Labels=Labels)
+        PT.XYPlot(DataFrame=DataFrame,
+                  Columns=Columns,
+                  CustomPlotTypes=PlotTypes,
+                  Labels=Labels)
         fig, ax = (None, None)
     return fig, ax
 
-def ToggleD3(D3State):
+def ToggleD3():
     import mpld3
     if D3State is False:
         mpld3.enable_notebook()

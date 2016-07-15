@@ -63,12 +63,12 @@ def GenerateColours(Columns, Colormap=["div", "Spectral"]):
     
     """ Three cases depending on the number of plots """
     if NPlots == 1:
-        Colors = ['rgb(252,141,89)']
+        Colors = ['rgb(252,141,89)']                            # Just red for one plot
     elif NPlots == 2:
-        Colors = ['rgb(252,141,89)', 'rgb(153,213,148)']
+        Colors = ['rgb(252,141,89)', 'rgb(153,213,148)']        # Red and green for two plots
     else:
         import colorlover as cl
-        Colors = cl.scales[str(NPlots)][Colormap[0]][Colormap[1]]
+        Colors = cl.scales[str(NPlots)][Colormap[0]][Colormap[1]]  # For n > 2, moar colours
     
     OutColors = dict()
     for Index, Column in enumerate(Columns):         # Set colours
@@ -147,8 +147,22 @@ def FilterPlotTypes(Columns, PlotTypes, CustomPlotTypes):
 
 """ Plotting Routines """
 
-def PlotMarkersDataFrame(DataFrame, Columns=None, CustomPlotTypes=None, Labels=None):
-    NPlots = len(DataFrame.keys())
+def XYPlot(DataFrame, Columns=None, CustomPlotTypes=None, Labels=None):
+    """ Use Plotly to plot a dataframe using XY markers.
+        Some optional arguments are:
+
+        Columns as a list of dataframe keys to choose which
+        series to plot
+
+        CustomPlotTypes will change the type (line or marker)
+        of plot to be made for that series. Input as a dictionary
+        with the dataframe keys and specify the plot type by a string.
+
+        e.g. {"Y Range": "line"}
+
+        Labels will let you change the title and axis labels. 
+
+    """
     
     if Columns is None:
         Columns = list(DataFrame.keys())              # if nothing specified, plot them all
@@ -168,6 +182,8 @@ def PlotMarkersDataFrame(DataFrame, Columns=None, CustomPlotTypes=None, Labels=N
                 Layout["xaxis"]["title"] = Labels["X Label"]
             if Key == "Y Label":
                 Layout["yaxis"]["title"] = Labels["Y Label"]
+            if Key == "Title":
+                Layout["title"] = Labels["Title"]
     
     for Plot in Columns:
         PlotSettings[Plot] = DefaultPlotSettings(PlotTypes[Plot])    # Copy default settings
@@ -189,27 +205,41 @@ def PlotMarkersDataFrame(DataFrame, Columns=None, CustomPlotTypes=None, Labels=N
                     )
     iplot(dict(data=Plots, layout=Layout))
 
-def XYZPlot(DataFrame, Type="Heatmap", Colourmap=["div","Spectral"], Title=None):
+def XYZPlot(DataFrame, Type="Heatmap", Colourmap=["div","Spectral"], Labels=None):
     """ A general wrapper for three dimensional data.
         Takes a dataframe and plots the data as xyz.
 
+        The X data is taken from the dataframe index,
+        while the Y data is taken as the column headings.
+
         Choices are:
-        Heatmap, Contour and Surface.
+        Heatmap, Contour, Surface and Scatter.
+
+        The others are more obvious, but for Scatter the Z
+        dimension is given as colour intensity.
     """
+    """ Assign data to variables """
     ZData = DataFrame.as_matrix()
-    if len(Colourmap) == 2:
-        Map = GenerateColourMap(ZData, Colourmap)                    # generate a colour map
-    else:
-        Map = Colourmap
     XData = DataFrame.index
     YData = list(DataFrame.keys())
-    LayoutSettings = {"title": Title,
-                      "autosize": False,
-                      "width": 950,
-                      "height": 600,
-                      "plot_bgcolor":"rgb(230,230,230)"
-                      }
-    """ Set up the plot parameters now """
+
+    """ Generate colour map and layout settings """
+    if len(Colourmap) == 2:                             # this case depends on what's passed as Colourmap
+        Map = GenerateColourMap(ZData, Colourmap)       # if it's a 2-tuple string, it's specifying colorlover
+    else:
+        Map = Colourmap                                 # otherwise it's specifying the name of the colourmap
+
+    LayoutSettings = DefaultLayoutSettings()                         # initialise layout
+    if Labels is not None:                                           # change to specified labels
+        for Key in Labels:
+            if Key == "Title":
+                LayoutSettings["title"] = Labels[Key]
+            if Key == "X Label":
+                LayoutSettings["xaxis"]["title"] = Labels[Key]
+            if Key == "Y Label":
+                LayoutSettings["yaxis"]["title"] = Labels[Key]
+
+    """ Set up the plot parameters """
     Parameters = {"x": XData,
                   "y": YData,
                   "z": ZData,
@@ -221,7 +251,7 @@ def XYZPlot(DataFrame, Type="Heatmap", Colourmap=["div","Spectral"], Title=None)
         Function = go.Heatmap
     elif Type == "Contour":
         Function = go.Contour
-        Parameters["line"] = {"smoothing": 0.7}
+        Parameters["line"] = {"smoothing": 0.7}        # smoothes the contour lines
     elif Type == "Surface":
         Function = go.Surface
     elif Type == "Scatter":
@@ -235,20 +265,4 @@ def XYZPlot(DataFrame, Type="Heatmap", Colourmap=["div","Spectral"], Title=None)
                                 }
 
     Trace = [Function(**Parameters)]
-
-    iplot(dict(data=Trace, layout=LayoutSettings))
-
-def SurfacePlot(DataFrame, Colourmap=["div", "Spectral"], Title=None):
-    ZData = DataFrame.as_matrix()                           # convert dataframe to matrix
-    Map = GenerateColourMap(ZData)                          # generate a colour map
-    LayoutSettings = {"title": Title,
-                      "autosize": False,
-                      "width": 600,
-                      "height": 600,
-                      "plot_bgcolor":"rgb(230,230,230)"
-                      }
-    Trace = [go.Surface(z=ZData,
-                        colorscale=Map
-                        ),
-            ]
     iplot(dict(data=Trace, layout=LayoutSettings))

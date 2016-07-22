@@ -66,6 +66,8 @@ def GenerateColours(Columns, Colormap=["div", "Spectral"]):
         Colors = ['rgb(252,141,89)']                            # Just red for one plot
     elif NPlots == 2:
         Colors = ['rgb(252,141,89)', 'rgb(153,213,148)']        # Red and green for two plots
+    elif NPlots == 3:
+        Colors = ['rgb(252,141,89)', 'rgb(103,169,207)', 'rgb(153,213,148)']  # Add blue to avoid yellow...
     else:
         import colorlover as cl
         Colors = cl.scales[str(NPlots)][Colormap[0]][Colormap[1]]  # For n > 2, moar colours
@@ -84,22 +86,69 @@ def GenerateColourMap(Data, Colormap=["div", "Spectral"]):
         Map.append([Value, Colors[Index]])
     return Map
 
+def GenerateAnnotations(Annotations, Interface="plotly"):
+    """ Takes a dictionary of annotations, and generates them for
+        a specified interface.
+
+        The form should be like:
+        Annotations[Number] = {"type": "vline",
+                               "color": "whatever",
+                               "position": 5.
+                               }
+    """
+    AllAnnotations = []
+    for Annotation in Annotations:
+        AnnotationType = Annotations[Annotation]["type"]
+        Settings = DefaultAnnotationSettings(AnnotationType, Interface=Interface)
+        if AnnotationType == "vline":
+            Settings["x0"] = Annotations[Annotation]["position"]
+            Settings["x1"] = Annotations[Annotation]["position"]
+            Settings["y0"] = 0.
+            Settings["y1"] = 1.
+        elif AnnotationType == "hline":
+            Settings["x0"] = 0.
+            Settings["x1"] = 1000.
+            Settings["y0"] = Annotations[Annotation]["position"]
+            Settings["y1"] = Annotations[Annotation]["position"]
+        AllAnnotations.append(Settings)
+    return AllAnnotations
+
 ###############################################################################
 
 """ Default/Initialisation routines """
+
+def DefaultAnnotationSettings(Type, Interface="plotly"):
+    if Interface == "plotly":
+        if Type == "vline" or "hline":
+            AnnotationSettings = {"type": "line",
+                                  "xref": "x",
+                                  "yref": "y",
+                                  "opacity": 0.8,
+                                  "x0": 0.,
+                                  "y0": 0.,
+                                  "x1": 0.,
+                                  "y1": 0.,
+                                  "line": {"color": 'rgb(50, 171, 96)', 
+                                           "dash": "dashdot",
+                                           "width": 4.
+                                           },
+                                  }
+    return AnnotationSettings
 
 def DefaultPlotSettings(PlotType="markers"):
     PlotSettings = dict()
     if PlotType == "line":                               # line plot defaults
         PlotSettings = {"mode": PlotType,
-                        "line": {"width": 2.,
+                        "line": {"width": 4.,
                                  "color": "blue",
                                 },
                         }
     elif PlotType == "markers" or "marker":              # marker plot defaults
         PlotSettings = {"mode": "markers",
                         "marker": {"size": 12.,
-                                   "color": "blue"
+                                   "color": "blue",
+                                   "line": dict(width = 2.,
+                                                color = "rgb(0., 0., 0., 0.8)"),
                                   },
                         }
     return PlotSettings
@@ -122,6 +171,12 @@ def DefaultLayoutSettings():
                       "height": 500,
                       
                      }
+    LayoutSettings["xaxis"]["showgrid"] = True
+    LayoutSettings["xaxis"]["gridwidth"] = 2
+    LayoutSettings["xaxis"]["gridcolor"] = "#bdbdbd"
+    LayoutSettings["yaxis"]["showgrid"] = True
+    LayoutSettings["yaxis"]["gridwidth"] = 2
+    LayoutSettings["yaxis"]["gridcolor"] = "#bdbdbd"
     return LayoutSettings
 
 def FilterPlotTypes(Columns, PlotTypes, CustomPlotTypes):
@@ -147,7 +202,7 @@ def FilterPlotTypes(Columns, PlotTypes, CustomPlotTypes):
 
 """ Plotting Routines """
 
-def XYPlot(DataFrame, Columns=None, CustomPlotTypes=None, Labels=None):
+def XYPlot(DataFrame, Columns=None, CustomPlotTypes=None, Labels=None, Annotations=None):
     """ Use Plotly to plot a dataframe using XY markers.
         Some optional arguments are:
 
@@ -177,13 +232,15 @@ def XYPlot(DataFrame, Columns=None, CustomPlotTypes=None, Labels=None):
     
     Layout = DefaultLayoutSettings()                  # Generate the default layout
     if Labels is not None:
-        for Key in Labels:
+        for Key in Labels:                            # Assign each label appropriately
             if Key == "X Label":
                 Layout["xaxis"]["title"] = Labels["X Label"]
             if Key == "Y Label":
                 Layout["yaxis"]["title"] = Labels["Y Label"]
             if Key == "Title":
                 Layout["title"] = Labels["Title"]
+    if Annotations is not None:                       # if Annotations are given, make them
+        Layout["shapes"] = GenerateAnnotations(Annotations)
     
     for Plot in Columns:
         PlotSettings[Plot] = DefaultPlotSettings(PlotTypes[Plot])    # Copy default settings
@@ -252,6 +309,9 @@ def XYZPlot(DataFrame, Type="Heatmap", Colourmap=["div","Spectral"], Labels=None
     elif Type == "Contour":
         Function = go.Contour
         Parameters["line"] = {"smoothing": 0.7}        # smoothes the contour lines
+        LayoutSettings["width"] = 650                  # square contour plot
+        LayoutSettings["height"] = 600
+
     elif Type == "Surface":
         Function = go.Surface
     elif Type == "Scatter":

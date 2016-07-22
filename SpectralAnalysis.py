@@ -252,6 +252,7 @@ class Spectrum:
             elif Verbose == False:
                 pass
             self.Data["Fit Results"] = self.FitResults["Model Fit"]
+            self.Data["Residuals"] = self.FitResults["Residuals"]
         except RuntimeError:
             print ''' No data column eligible for fitting/"Y Range" doesn't exist. '''
             print ''' You may need to repack the data manually using FormatData. '''
@@ -289,7 +290,7 @@ class Spectrum:
             uncertainty
         """
         try:
-            OriginalFit = np.array(self.FitResults["Model Fit"])
+            #OriginalFit = np.array(self.FitResults["Model Fit"])
             OriginalData = np.array(self.FitResults["Data"])
             X = np.array(self.FitResults.index)
         except AttributeError:
@@ -314,11 +315,35 @@ class Spectrum:
         self.BootstrapReport
         print " Finished analysis. Check object BootstrapReport"
 
-    def IntegrateColumn(self, Column="Y Range"):
-        """ Return the integral of a column """
-        X = self.Data.index
-        Y = np.array(self.Data[Column])
+    def IntegrateColumn(self, Column="Y Range", Range=None):
+        """ Return the integral of a column 
+            The range can be specified by a 2-tuple list by
+            supplying the indices to begin and end.
+        """
+        X = np.nan_to_num(self.Data.index)              # Ensure there are no NaNs
+        Y = np.nan_to_num(np.array(self.Data[Column]))  # in our arrays
+        if Range is not None:
+            X = X[Range[0]:Range[1]]
+            Y = Y[Range[0]:Range[1]]
         return np.trapz(Y, X)
+
+    def CalculateBranching(self):
+        """ Calculate the branching fraction between dataframe items
+            if Y Range is present, we assume it's the experimental
+            data and treat that as the cumulative sum.
+        """
+        Integrals = dict()
+        CumSum = 0.
+        for Key in self.Data:
+            Integrals[Key] = [self.IntegrateColumn(Column=Key)]
+            CumSum = CumSum + self.IntegrateColumn(Column=Key)
+        if "Y Range" in self.Data.keys():
+            CumSum = self.IntegrateColumn(Column="Y Range")
+        for Key in self.Data:
+            Integrals[Key].append(Integrals[Key][0] / CumSum)
+        self.Fractions = pd.DataFrame.from_dict(Integrals)
+        self.Fractions.index = ["Integral", "Fraction"]
+        return self.Fractions
 
 ###################################################################################################
 
@@ -402,6 +427,14 @@ def ConvertSpeedDistribution(DataFrame, Mass, Units="cm"):
     #for index, value in enumerate(KERDataFrame)
     return KERDataFrame
 
+def ConvertKERDistribution(DataFrame, Mass):
+    Column = DataFrame.keys()[0]              # take the first Y set
+    Speed = np.sqrt(((np.array(DataFrame.index) / 83.59) * 2000.) / (Mass / 1000.))
+    PS = np.array(DataFrame[Column] * (Mass / 1000.)) * DataFrame.index
+    SpeedDataFrame = pd.DataFrame(data=PS, index=Speed, columns=["Y Range"])
+    SpeedDataFrame = SpeedDataFrame.dropna(axis=0)
+    return SpeedDataFrame
+
 def NormaliseColumn(DataFrame, Column="Y Range"):
     """ Routine to normalise a column in pandas dataframes
     """
@@ -477,6 +510,23 @@ def SubtractSpectra(A, B):
     Subtraction = YA - RecastYB
     return FormatData(XA, Subtraction)
 
+def InterpolateDFColumn(DataFrameA, DataFrameB):
+    """ Interpolates the columns of DataFrameA to the
+        index of DataFrameB.
+
+        First match the sizes of the two dataframes,
+        then interpolates the y of Frame A into x of Frame B.
+    """
+    CutDFA, CutDFB = NT.MatchDataFrames(DataFrameA, DataFrameB)
+    NewDF = pd.DataFrame()         # New DF to store the interpolated A values
+    NewX = CutDFB.index            # The values of x we will interpolate to
+    OldX = CutDFA.index            # The old values of x
+    for Key in CutDFA:             # Loop over columns of DataFrameA
+        Interpolant = interpolate.interp1d(OldX, np.array(CutDFA[Key]))
+        NewDF[Key] = Interpolant(NewX)
+    NewDF.index = NewX
+    return NewDF
+
 def UpdateDictionary(OldDictionary, NewValues):
     """ Will loop over keys in new dictionary and set
     them to the old dictionary
@@ -531,11 +581,14 @@ def FitModel(DataFrame, Model, Column="Y Range", Verbose=False):
     FittedCurves = pd.DataFrame(data=zip(DataFrame[Column], ModelFit),
                                          columns=["Data", "Model Fit"],
                                          index=np.array(DataFrame.index, dtype=float))
+    FittedCurves["Residuals"] = DataFrame[Column] - ModelFit
     if Verbose == True:
         print " ------------------------------------------------------"
         print " Parameter Report:"
         print ParameterReport
         CheckCovariance(CovarianceMatrix)
+        print " ------------------------------------------------------"
+        print " RMS:\t" + str(np.average(np.square(np.array(FittedCurves["Residuals"]))))
     return OptimisedParameters, ParameterReport, FittedCurves, CovarianceMatrix
 
 class LeastSqObject:
@@ -715,8 +768,8 @@ def Linear(x, Gradient, Offset):
 def PriorFunction(x, A, i, j):
     return A * (x**i) * (1. - x)**j
 
-def SingleExponential(x, Amplitude, Gradient):
-    return Amplitude * np.exp(Gradient * x)
+def SingleExponential(x, Amplitude, Gradient, Offset):
+    return Amplitude * np.exp(Gradient * (x + Offset))
 
 @jit
 def ConvolveArrays(A, B, method="new"):
@@ -859,7 +912,7 @@ def SetupPyplotTypes(Key, Scaling=None, Colours=None, PlotType=None):
         pass
     return Wrappers[PlotType], Settings
 
-def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplot", PlotTypes=None):
+def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplot", PlotTypes=None, Annotations=None):
     """ A themed data plotting routine. Will use either matplotlib or
     bokeh to plot everything in an input dataframe, where the index is
     the X axis.
@@ -918,7 +971,7 @@ def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplo
             Colours[Key] = "blue"
             if Plots[Key] is "scatter" or "bar":
                 ColourCounts = ColourCounts + 1
-        ColourMap = cm.Spectral(np.linspace(0, 1, ColourCounts))   # Interpolate colours
+        ColourMap = cm.Accent(np.linspace(0, 1, ColourCounts))   # Interpolate colours
         for Index, Key in enumerate(Plots):                      # Assign colour to plot
             Colours[Key] = ColourMap[Index]
 
@@ -935,8 +988,9 @@ def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplo
                                                           )
             PlotFunction(DataFrame.index, DataFrame[Key], **PlotSettings)
         if Legend is True:
-            plt.legend(ncol=2, loc=0)
+            plt.legend(ncol=1, loc=0)
         ax.grid()
+        #ax.set_autoscale(enable=True, tight=True)
         plt.show()
     elif Interface == "bokeh":                                # Use bokeh library
         NCols = len(DataFrame.columns)                            # Get the number of columns
@@ -976,7 +1030,9 @@ def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplo
         PT.XYPlot(DataFrame=DataFrame,
                   Columns=Columns,
                   CustomPlotTypes=PlotTypes,
-                  Labels=Labels)
+                  Labels=Labels,
+                  Annotations=Annotations
+                  )
         fig, ax = (None, None)
     return fig, ax
 

@@ -30,6 +30,25 @@ def CheckString(String, CheckList):
         Exists = False
     return Exists
 
+def MatchDataFrames(DataFrameA, DataFrameB):
+    """ Determine which dataframe is shorter in the upper and lower
+        X values, then cut both to match each other.
+
+        Since this is written with interpolating A into B in mind,
+        A will be made larger than B.
+    """
+    Index = 0
+    while DataFrameA.index[0] > DataFrameB.index[0]:
+        DataFrameB = DataFrameB.iloc[Index:]
+        Index = Index + 1
+
+    Index = len(DataFrameB.index)
+    while DataFrameA.index[-1] < DataFrameB.index[-1]:
+        DataFrameB = DataFrameB.iloc[:Index]
+        Index = Index -1
+
+    return DataFrameA, DataFrameB
+
 def PhotonEnergy2NPhoton(Wavelength, Power):
     """ Convert laser power for a given wavelength
         and power (in mJ) to number of photons
@@ -179,6 +198,25 @@ def LoadObject(Database):
     db.close()
     return temp
 
+def ReadLines2Array(FileContent, Lines):
+    """ Supply the conents of a file and the lines we wish to read
+        as a list and return each line as a numpy array
+    """
+    Array = []
+    for Line in Lines:
+        Array.append(FileContent[Line].split())
+    Array = np.array(Array)                  # Convert list to array
+    Array = Array.astype(np.float)           # Convert string to floats
+    return Array
+
+def SaveDFasTab(DataFrame, File, delimiter="\t"):
+    Arrays = []
+    Arrays.append(DataFrame.index)           # First set is X
+    for Key in DataFrame:
+        Arrays.append(np.array(DataFrame[Key]))
+    Arrays = np.array(Arrays)
+    np.savetxt(File, Arrays, delimiter=delimiter)
+
 ###################         HDF5 Tools          ###################
 
 """ Technically should be under I/O, but I think this is a special
@@ -198,6 +236,10 @@ def StripSuffixes(Filename):
 def StripExtension(Filename):
     """ Strips the extension of the file only. """
     return Filename.split(".")[0]
+
+def StripFolder(Filename):
+    """ Strips the path information from file """
+    return Filename.split("/")[-1]
 
 def LoadDatabase(Database):
     """ Attempts to load a database with exception catching.
@@ -281,7 +323,7 @@ def Speed2KER(Data, Mass):
 def KER2Speed(Data, Mass):
     """ Convert kinetic energy in 1/cm to metres per second.
     """
-    Speed = np.zeros(len(Data[0]), dtype=float)
+    Speed = np.zeros(len(Data.keys()[0]), dtype=float)
     for index, energy in enumerate(Data[0]):
         Speed[index] = np.sqrt(((energy / 83.59) * 2000.) / Mass)
     return Speed

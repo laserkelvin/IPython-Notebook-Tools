@@ -215,7 +215,7 @@ def SaveDFasTab(DataFrame, File, delimiter="\t"):
     for Key in DataFrame:
         Arrays.append(np.array(DataFrame[Key]))
     Arrays = np.array(Arrays)
-    np.savetxt(File, Arrays, delimiter=delimiter)
+    np.savetxt(File, Arrays.T, delimiter=delimiter)
 
 ###################         HDF5 Tools          ###################
 
@@ -274,15 +274,16 @@ def AddDatabaseEntry(Database, File):
         Database.create_group("/" + Reference)   # in the database, if not create it
     try:
         Database[Reference].create_dataset(File,    # Load the data
-                                           data=np.fromfile(File),  # into database
+                                           data=np.loadtxt(File),  # into database
                                            compression="gzip",      # and compress it
                                            compression_opts=9
                                            )
-    except (RuntimeError, ValueError):                          # Catches numpy load
-        print StripExtension(File) + " could be loaded."        # and compression errors
+    except (RuntimeError, ValueError):                              # Catches numpy load
+        print StripExtension(File) + " could not be loaded."        # and compression errors
+        
         pass
 
-def PackDirectory(Database, FileTypes=["*.dat", "*.bin"]):
+def PackDirectory(Database, FileTypes=["*.dat*", "*.bin*"]):
     """ Pack a directory of files with a given extension into
         an HDF5 database.
         I wrote this with logbook references in mind, so the

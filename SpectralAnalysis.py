@@ -14,7 +14,7 @@ import peakutils
 from scipy import fftpack
 from scipy import signal
 from scipy import interpolate
-from scipy.optimize import curve_fit, leastsq
+from scipy.optimize import curve_fit, leastsq, least_squares
 from bokeh.palettes import brewer
 from bokeh.plotting import figure, show
 from numba import jit
@@ -435,6 +435,12 @@ def ConvertKERDistribution(DataFrame, Mass):
     SpeedDataFrame = SpeedDataFrame.dropna(axis=0)
     return SpeedDataFrame
 
+def InvertInternalEnergy(DataFrame, MassFraction, Eavail):
+    NewDF = DataFrame.copy()                                 # Copy the dataframe over
+    NewDF.index = NewDF.index / MassFraction                 # Convert to TKER
+    NewDF.index = Eavail - NewDF.index                       # Convert to Internal Energy
+    return NewDF
+
 def NormaliseColumn(DataFrame, Column="Y Range"):
     """ Routine to normalise a column in pandas dataframes
     """
@@ -544,6 +550,18 @@ def ConvertOrderedDict(Dictionary):
 
 """ Fitting functions & Analysis """
 
+def IntegrateColumn(DataFrame, Column="Y Range", Range=None):
+    """ Return the integral of a column 
+        The range can be specified by a 2-tuple list by
+        supplying the indices to begin and end.
+    """
+    X = np.nan_to_num(DataFrame.index)              # Ensure there are no NaNs
+    Y = np.nan_to_num(np.array(DataFrame[Column]))  # in our arrays
+    if Range is not None:
+        X = X[Range[0]:Range[1]]
+        Y = Y[Range[0]:Range[1]]
+    return np.trapz(Y, X)
+
 def FitModel(DataFrame, Model, Column="Y Range", Verbose=False):
     """ Uses an instance of the Model class to fit data contained
     in the pandas dataframe. Dataframe should have indices of the X-range
@@ -588,30 +606,9 @@ def FitModel(DataFrame, Model, Column="Y Range", Verbose=False):
         print ParameterReport
         CheckCovariance(CovarianceMatrix)
         print " ------------------------------------------------------"
+        print " Mean-signed-error:\t" + str(np.average(np.array(FittedCurves["Residuals"])))
         print " RMS:\t" + str(np.average(np.square(np.array(FittedCurves["Residuals"]))))
     return OptimisedParameters, ParameterReport, FittedCurves, CovarianceMatrix
-
-class LeastSqObject:
-    def __init__(self, DataFrame, Column="Y Range"):
-        self.Data = DataFrame
-        self.XData = DataFrame.index 
-        self.YData = DataFrame[Column]
-        self.InitialParameters = []
-
-    def SetFunction(self, Function):
-        """ This is the model function that will be used
-            to generate the model data; e.g. np.sin(x)
-        """
-        self.Function = Function
-        def ResidualFunction(self, Parameters):
-            """ Procedurally generate the residual function """
-            return self.YData - self.Function(*Parameters)
-        self.ResidualFunction = ResidualFunction
-
-    def MinimizeFunction(self):
-        self.OptimisedParameters, self.CovarianceMatrix = leastsq(self.ResidualFunction,
-                                                                  self.InitialParameters,
-                                                                  args=(self.XData, self.YData))
 
 def LeastSqFit(ResidualFunction, InitialParameters, DataFrame, Column="Y Range"):
     """ Function for using scipy.optimize.leastsq to generically fit
@@ -624,6 +621,106 @@ def LeastSqFit(ResidualFunction, InitialParameters, DataFrame, Column="Y Range")
         print " No column named " + Column + " in DataFrame."
         exit()
     return leastsq(ResidualFunction, InitialParameters, args=(XData, YData))
+
+def ScipyLinearRegression(DataFrame, Column=None, Intercept=False, Robust=False, Margin=0.1, 
+                          Interface="plotly", Labels=None, Bootstrap=False):
+    """ New version of a linear regression routine, coded as a wrapper
+        for the least squares function from SciPy.
+
+        Taken from the SciPy cookbook:
+        http://scipy-cookbook.readthedocs.io/items/robust_regression.html
+
+        Has the option of doing a robust regression, where outliers
+        are assessed as well during the linear regression.
+
+        FitResults is an object, containing the results of the fits.
+    """
+    if Intercept is False:
+        def LinearResidualFunction(Parameters, XData, YData):
+            """ Residual function where the objectives of the fit are
+                contained in Parameters as a list or nparray
+
+                Intercept is set to zero
+            """
+            return (Parameters[0] * XData) - YData
+    elif Intercept is True:
+        def LinearResidualFunction(Parameters, XData, YData):
+            """ Residual function where the objectives of the fit are
+                contained in Parameters as a list or nparray
+
+                Intercept is fit
+            """
+            return (Parameters[0] * XData + Parameters[1]) - YData
+
+    if Column == None:
+        Y = np.array(DataFrame[DataFrame.keys()[0]].values)     # if none specified, do regression on the first column
+    else:
+        Y = np.array(DataFrame[Column].values)                  # otherwise use the specified column
+    X = np.array(DataFrame.index.values)
+    if Robust == False:
+        LossFunction = "linear"
+        Margin = None                                    # if it's normal linear regression, ignore outlier
+    elif Robust == True:
+        LossFunction = "soft_l1"                         # use 
+
+    InitialGuess = np.zeros(2)                            # initial guess for linear fit are ones
+    FitResults = least_squares(fun=LinearResidualFunction, 
+                               x0=InitialGuess,
+                               loss=LossFunction,
+                               f_scale=Margin,
+                               args=(X, Y))
+    print "--------------------------------------------"
+    print " Optimal parameters:\t" + str(FitResults.x)
+    FittedY = Linear(X, *FitResults.x)
+    SSResiduals = np.sum(np.square(FittedY - Y))
+    SSY = np.sum(np.square(Y - np.average(Y)))
+    print " R**2 value:\t" + str(1. - SSResiduals / SSY)
+    print "--------------------------------------------"
+    if Bootstrap == True:
+        Parameters = []
+        NTrials = 100 
+        for Trial in xrange(NTrials):
+            SimulatedY = AddNoise(FittedY)
+            BootstrapResults = least_squares(fun=LinearResidualFunction, 
+                                             x0=InitialGuess,
+                                             loss=LossFunction,
+                                             f_scale=Margin,
+                                             args=(X, SimulatedY))
+            Parameters.append(BootstrapResults.x)
+        print " Bootstrap analysis results:"
+        print " Averages:\t" + str(np.average(Parameters, axis=0))
+        print " Sigma:\t" + str(np.std(Parameters, axis=0))
+        FitResults.BootstrapAverage = np.average(Parameters, axis=0)
+        FitResults.BootstrapStdDev = np.std(Parameters, axis=0)
+    print "--------------------------------------------"
+    DataFrame = pd.DataFrame(data=zip(Y, FittedY),
+                             index=X,
+                             columns=["Y Range", "Linear Regression"])
+    PlotData(DataFrame, 
+             Interface=Interface,
+             Labels=Labels
+             )
+    return DataFrame, FitResults
+
+def LinearRegression(DataFrame, Columns=None, Labels=None):
+    RegressionReport = dict()
+    LinearModel = Model("Linear regression model")       # Set up regression model
+    if Columns is None:
+        Columns = list(DataFrame.keys())            # Default is regress all columns
+    with NT.suppress_stdout():
+        # Supress output
+        LinearModel.SetFunction(Linear)
+        for Data in Columns:
+            if "-Regression" in Data:         # No need to regress more than once!
+                pass
+            else:
+                Opt, Report, Fits, Cov = FitModel(DataFrame, Model=LinearModel, Column=Data, Verbose=False)
+                DataFrame[Data + "-Regression"] = Linear(DataFrame.index, *Opt)    # Plot the curves
+                RegressionReport[Data] = Report
+                if (Data + "-Regression") not in Columns:
+                    Columns.append(Data + "-Regression")
+    fig, ax = PlotData(DataFrame=DataFrame, Columns=Columns, Labels=Labels)
+    return RegressionReport
 
 def CheckCovariance(CovarianceMatrix, Threshold=1E-2):
     OffDiagonalElements = NT.CheckOffDiagonal(CovarianceMatrix)
@@ -714,26 +811,6 @@ def AddNoise(Y, DampFactor=0.5):
         NewData[Iterator.index] = Y[Iterator.index] + (Y[Iterator.index] * np.random.rand() * Multiplier)
         Iterator.iternext()                         # Next iteration of loop
     return NewData
-
-def LinearRegression(DataFrame, Columns=None, Labels=None):
-    RegressionReport = dict()
-    LinearModel = Model("Linear regression model")       # Set up regression model
-    if Columns is None:
-        Columns = list(DataFrame.keys())            # Default is regress all columns
-    with NT.suppress_stdout():
-        # Supress output
-        LinearModel.SetFunction(Linear)
-        for Data in Columns:
-            if "-Regression" in Data:         # No need to regress more than once!
-                pass
-            else:
-                Opt, Report, Fits, Cov = FitModel(DataFrame, Model=LinearModel, Column=Data, Verbose=False)
-                DataFrame[Data + "-Regression"] = Linear(DataFrame.index, *Opt)    # Plot the curves
-                RegressionReport[Data] = Report
-                if (Data + "-Regression") not in Columns:
-                    Columns.append(Data + "-Regression")
-    fig, ax = PlotData(DataFrame=DataFrame, Columns=Columns, Labels=Labels)
-    return RegressionReport
 
 def AnisotropyAveraging(Spectrum, PixelRange=[165,195]):
     """ Calculates the average anisotropy value for a range of pixels

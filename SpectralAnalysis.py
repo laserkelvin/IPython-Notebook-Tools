@@ -19,6 +19,7 @@ from bokeh.palettes import brewer
 from bokeh.plotting import figure, show
 from numba import jit
 import InteractiveWidgets as IW
+import seaborn as sns
 
 # SpectralAnalysis.py
 
@@ -72,6 +73,7 @@ class Spectrum:
         self.CalibratedWavelengths = [0., 0.,]
         self.PumpWavelength = 0.
         self.ProbeWavelength = 0.
+        self.Annotations = dict()
         self.Comments = ""
         if Reference is not None:                       # If we give it a logbook reference
             self.Reference = Reference
@@ -200,13 +202,13 @@ class Spectrum:
         Target = FormatData(self.Data.index, np.array(self.Data[Column]))
         PlotData(DataFrame=Target, Labels=self.Labels, Interface=Interface, Legend=Legend)
 
-    def PlotAll(self, Labels=None, Legend=True, Interface="pyplot", PlotTypes=None):
+    def PlotAll(self, Columns=None, Labels=None, Legend=True, Interface="pyplot", PlotTypes=None):
         self.PlotLabels()
         if Labels is not None:
             self.SetLabels(Labels)
         if PlotTypes is not None:
             self.PlotTypes = PlotTypes
-        PlotData(DataFrame=self.Data, Labels=self.Labels, Interface=Interface, Legend=Legend, PlotTypes=PlotTypes)
+        PlotData(DataFrame=self.Data, Columns=Columns, Labels=self.Labels, Interface=Interface, Legend=Legend, PlotTypes=PlotTypes)
 
     def PlotLabels(self, Column=None):
         if Column is None:
@@ -263,9 +265,15 @@ class Spectrum:
         store that information as an attribute
         """
         PeakIndices = PeakFinding(self.Data, Column, Threshold, MinimumDistance)
+        PeakX = [self.Data.index[Index] for Index in PeakIndices]
         self.Peaks = {"Peak Indices": PeakIndices,
                       "Threshold": Threshold,
                       "Minimum Distance": MinimumDistance}
+        for PeakNumber, PeakIndex in enumerate(PeakIndices):
+            self.Annotations[PeakNumber] = {"type": "vline", 
+                                            "position": self.Data.index[PeakIndex], 
+                                            "text": str(PeakNumber)}
+        self.PeakReport = pd.DataFrame(data=zip(PeakIndices, PeakX), columns=["Indices", "X Value"])
 
     def Smooth(self, WindowSize=5, Column="Y Range"):
         """ Smooths the experimental data using a Svatizky-Golay filter
@@ -282,6 +290,17 @@ class Spectrum:
                 NormaliseColumn(self.Data, Column=Column)
             else:
                 pass
+
+    def CalcAvailableEnergy(self, DissociationEnergy):
+        """ Dissociation energy is in 1/cm, this routine calculates
+            the available energy for a spectrum object
+        """
+        if self.PumpWavelength != 0.:
+            self.Eavail = 1e7 / self.PumpWavelength - DissociationEnergy
+        else:
+            self.PumpWavelength = float(raw_input("No pump wavelength found, please specify one."))
+            self.Eavail = 1e7 / self.PumpWavelength - DissociationEnergy
+        return self.Eavail
 
     def BootstrapAnalysis(self, Model, DampFactor=0.5, Trials=100):
         """ Routine that will take a Spectral object and
@@ -812,6 +831,18 @@ def AddNoise(Y, DampFactor=0.5):
         Iterator.iternext()                         # Next iteration of loop
     return NewData
 
+def HistogramBin(Array, Bins="auto", KDE=True, Plot=False):
+    Histogram, Bins = np.histogram(Array,
+                                   bins=Bins,
+                                   density=KDE,
+                                   )
+    DataFrame = pd.DataFrame(data=Histogram, index=Bins[:-1], columns=["Histogram"])
+    if Plot is True:
+        PlotData(DataFrame, PlotTypes={"Histogram": "bar"})
+    else:
+        pass
+    return DataFrame
+
 def AnisotropyAveraging(Spectrum, PixelRange=[165,195]):
     """ Calculates the average anisotropy value for a range of pixels
         in an angular distribution.
@@ -973,7 +1004,8 @@ def SetupPyplotTypes(Key, Scaling=None, Colours=None, PlotType=None):
                         "line": {"alpha": 0.8,
                                  "antialiased": True,
                                  "label": Key},
-                        "bar": {"alpha": 0.5,
+                        "bar": {"alpha": 0.8,
+                                "width": 0.5,
                                 "align": "center",
                                 "color": Colours[Key],
                                 "label": Key}

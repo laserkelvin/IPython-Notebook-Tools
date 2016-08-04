@@ -113,6 +113,23 @@ def GenerateAnnotations(Annotations, Interface="plotly"):
         AllAnnotations.append(Settings)
     return AllAnnotations
 
+def GenerateTextAnnotations(Annotations, Interface="plotly"):
+    AllAnnotations = []
+    for Annotation in Annotations:
+        if "text" in Annotations[Annotation]:
+            Settings = DefaultAnnotationSettings(Type="text", Interface=Interface)
+            Settings["text"] = Annotations[Annotation]["text"]
+            if Annotations[Annotation]["type"] == "vline":
+                Settings["y"] = -0.1
+                Settings["x"] = Annotations[Annotation]["position"]
+            elif Annotations[Annotation]["type"] == "hline":
+                Settings["x"] = -0.1
+                Settings["y"] = Annotations[Annotation]["position"]
+            AllAnnotations.append(Settings)
+        else:
+            pass
+    return AllAnnotations
+
 ###############################################################################
 
 """ Default/Initialisation routines """
@@ -123,15 +140,25 @@ def DefaultAnnotationSettings(Type, Interface="plotly"):
             AnnotationSettings = {"type": "line",
                                   "xref": "x",
                                   "yref": "y",
-                                  "opacity": 0.8,
+                                  "opacity": 0.5,
                                   "x0": 0.,
                                   "y0": 0.,
                                   "x1": 0.,
                                   "y1": 0.,
                                   "line": {"color": 'rgb(50, 171, 96)', 
                                            "dash": "dashdot",
-                                           "width": 4.
+                                           "width": 2.
                                            },
+                                  }
+        if Type == "text":
+            AnnotationSettings = {"text": " ",
+                                  "xref": "x",
+                                  "yref": "y",
+                                  "x": 0.,
+                                  "y": 0.,
+                                  "showarrow": True,
+                                  "arrowhead": 7,
+                                  "ay": -20
                                   }
     return AnnotationSettings
 
@@ -241,6 +268,7 @@ def XYPlot(DataFrame, Columns=None, CustomPlotTypes=None, Labels=None, Annotatio
                 Layout["title"] = Labels["Title"]
     if Annotations is not None:                       # if Annotations are given, make them
         Layout["shapes"] = GenerateAnnotations(Annotations)
+        Layout["annotations"] = GenerateTextAnnotations(Annotations)
     
     for Plot in Columns:
         PlotSettings[Plot] = DefaultPlotSettings(PlotTypes[Plot])    # Copy default settings

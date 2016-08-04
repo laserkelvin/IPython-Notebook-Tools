@@ -266,6 +266,7 @@ class Spectrum:
         """
         PeakIndices = PeakFinding(self.Data, Column, Threshold, MinimumDistance)
         PeakX = [self.Data.index[Index] for Index in PeakIndices]
+        PeakY = [1.2 for Peak in PeakIndices]
         self.Peaks = {"Peak Indices": PeakIndices,
                       "Threshold": Threshold,
                       "Minimum Distance": MinimumDistance}
@@ -273,7 +274,11 @@ class Spectrum:
             self.Annotations[PeakNumber] = {"type": "vline", 
                                             "position": self.Data.index[PeakIndex], 
                                             "text": str(PeakNumber)}
-        self.PeakReport = pd.DataFrame(data=zip(PeakIndices, PeakX), columns=["Indices", "X Value"])
+        try: 
+            del self.PeakReport
+        except AttributeError:
+            pass
+        self.PeakReport = pd.DataFrame(data=zip(PeakIndices, PeakX, PeakY), columns=["Indices", "X Value", "Stick"])
 
     def Smooth(self, WindowSize=5, Column="Y Range"):
         """ Smooths the experimental data using a Svatizky-Golay filter
@@ -748,6 +753,31 @@ def CheckCovariance(CovarianceMatrix, Threshold=1E-2):
         print str(len(ThresholdedElements)) + " elements of covariance matrix larger than\t" + str(Threshold)
         print " Check your privilege!"
 
+def ProgressionFitting(PeakNumbers, PeakReport, Offset=0):
+    """ Function for fitting a second order polynomial to a set of peaks
+        in some hope of finding out what the shit Ethane is...
+
+        Takes PeakNumbers as a list or array of integers corresponding to the
+        peak numbers we want to assign to a progression, and PeakReport which
+        holds the locations, indices and intensities for the peaks.
+
+        Offset will shift the M counter (arbitrary J effectively).
+    """
+    Locations = []
+    NPeaks = len(PeakNumbers)
+    for Peak in PeakNumbers:
+        Locations.append(PeakReport.iloc[Peak]["X Value"])              # Find the actual peak values
+
+    """ Set up the model """
+    PolynomialModel = Model("2nd order polynomial fit")
+    PolynomialModel.SetFunction(SecondOrderPolynomial)                  # set fitting function as quadratic
+
+    ProgressionObject = Spectrum(Reference="Progression")
+    ProgressionObject.Data = pd.DataFrame(data=Locations, index=np.arange(Offset, Offset+NPeaks), columns=["Y Range"])
+    ProgressionObject.Labels = {"X Label": "M","Y Label": "Energy","Title": "Progression Fit"}
+    ProgressionObject.Fit(PolynomialModel, Verbose=True,)
+    return ProgressionObject
+
 def PeakFinding(DataFrame, Column=None, Threshold=0.3, MinimumDistance=30.):
     """ Routine that will sniff out peaks in a spectrum, and fit them with Gaussian functions
     I have no idea how well this will work, but it feels like it's gonna get pretty
@@ -778,7 +808,7 @@ def VMICalibration(Spectrum):
     Spectrum.PlotLabels()
     from bokeh.io import output_notebook
     output_notebook()
-    Spectrum.PlotAll(Interface="bokeh")
+    Spectrum.PlotAll(Interface="plotly")
     NLines = int(raw_input(" Number of peaks used for calibration?"))
     PeakAssignments = ["3P", "5P", "3S", "5S"]
     PeakDict = OrderedDict()
@@ -869,6 +899,9 @@ def GaussianFunction(x, Amplitude, Centre, Width):
 def BoltzmannFunction(x, Amplitude, Temperature):
     #return Amplitude * np.exp(1) / (kcm * Temperature) * x * np.exp(- x / (kcm * Temperature))
     return Amplitude * np.sqrt(1 / (2 * np.pi * kcm * Temperature)**3) * 4 * np.pi * x * np.exp(-(x) / (kcm * Temperature))
+
+def SecondOrderPolynomial(x, A, B, C):
+    return (A * x**2.) + (B * x) + C
 
 def Linear(x, Gradient, Offset):
     return x * Gradient + Offset

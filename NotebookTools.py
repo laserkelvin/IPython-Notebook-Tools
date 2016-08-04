@@ -13,8 +13,49 @@ from scipy.signal import savgol_filter
 from contextlib import contextmanager
 import sys
 import os
+import glob
+import h5py
 
 ################## General notebook functions ####################
+
+def CheckString(String, CheckList):
+    """ Will check a String for a set of strings specifed in
+        CheckList. Returns boolean indicating if any of the
+        conditions are satisfied.
+    """
+    Booleans = np.array([Checked in String for Checked in CheckList])
+    if np.sum(Booleans) > 0:
+        Exists = True
+    else:
+        Exists = False
+    return Exists
+
+def MatchDataFrames(DataFrameA, DataFrameB):
+    """ Determine which dataframe is shorter in the upper and lower
+        X values, then cut both to match each other.
+
+        Since this is written with interpolating A into B in mind,
+        A will be made larger than B.
+    """
+    Index = 0
+    while DataFrameA.index[0] > DataFrameB.index[0]:
+        DataFrameB = DataFrameB.iloc[Index:]
+        Index = Index + 1
+
+    Index = len(DataFrameB.index)
+    while DataFrameA.index[-1] < DataFrameB.index[-1]:
+        DataFrameB = DataFrameB.iloc[:Index]
+        Index = Index -1
+
+    return DataFrameA, DataFrameB
+
+def PhotonEnergy2NPhoton(Wavelength, Power):
+    """ Convert laser power for a given wavelength
+        and power (in mJ) to number of photons
+    """
+    Energy = (1e7 / Wavelength) / 83.59     # kJ/mol
+    Moles = (Power * 1e-6) / Energy         # Power into kJ
+    return Moles * constants.Avogadro
 
 @contextmanager
 def suppress_stdout():
@@ -157,6 +198,111 @@ def LoadObject(Database):
     db.close()
     return temp
 
+def ReadLines2Array(FileContent, Lines):
+    """ Supply the conents of a file and the lines we wish to read
+        as a list and return each line as a numpy array
+    """
+    Array = []
+    for Line in Lines:
+        Array.append(FileContent[Line].split())
+    Array = np.array(Array)                  # Convert list to array
+    Array = Array.astype(np.float)           # Convert string to floats
+    return Array
+
+def SaveDFasTab(DataFrame, File, delimiter="\t"):
+    Arrays = []
+    Arrays.append(DataFrame.index)           # First set is X
+    for Key in DataFrame:
+        Arrays.append(np.array(DataFrame[Key]))
+    Arrays = np.array(Arrays)
+    np.savetxt(File, Arrays.T, delimiter=delimiter)
+
+###################         HDF5 Tools          ###################
+
+""" Technically should be under I/O, but I think this is a special
+    case since I hope to use it more often...
+
+    Still need to write a write data function to add stuff into
+    a database.
+"""
+
+def StripSuffixes(Filename):
+    """ Removes all of the suffixes for a file, which means
+        the file extension and also anything that I might've
+        added as comment like _CBS or _REMPI.
+    """
+    return Filename.split(".")[0].split("_")[0]
+
+def StripExtension(Filename):
+    """ Strips the extension of the file only. """
+    return Filename.split(".")[0]
+
+def StripFolder(Filename):
+    """ Strips the path information from file """
+    return Filename.split("/")[-1]
+
+def LoadDatabase(Database):
+    """ Attempts to load a database with exception catching.
+        If the database doesn't exist, raise an error.
+        
+        Returns the loaded database
+    """
+    try:
+        Temp = h5py.File(Database, "r+")
+    except IOError:
+        print "Database does not exist."
+        exit()
+    return Temp
+
+def LoadReference(Database, Reference, Verbose=True):
+    """ Used to retrieve a reference from a database.
+        Returns all of the data in a dictionary associated 
+        with a logbook reference.
+    """
+    Dictionary = dict()
+    for Key in Database[Reference].keys():
+        Dictionary[Key] = Database[Reference][Key][...]
+    if Verbose is True:
+        print Reference + " contains the following keys:"
+        print Dictionary.keys()
+    return Dictionary
+
+def AddDatabaseEntry(Database, File):
+    """ Used to add a file to a database. """
+    Reference = StripSuffixes(File)
+    if Reference not in Database.keys():         # See if there's already a group
+        Database.create_group("/" + Reference)   # in the database, if not create it
+    try:
+        Database[Reference].create_dataset(File,    # Load the data
+                                           data=np.loadtxt(File),  # into database
+                                           compression="gzip",      # and compress it
+                                           compression_opts=9
+                                           )
+    except (RuntimeError, ValueError):                              # Catches numpy load
+        print StripExtension(File) + " could not be loaded."        # and compression errors
+        
+        pass
+
+def PackDirectory(Database, FileTypes=["*.dat*", "*.bin*"]):
+    """ Pack a directory of files with a given extension into
+        an HDF5 database.
+        I wrote this with logbook references in mind, so the
+        general group hierarchy is:
+        
+        /Reference/Datafile/Data
+        
+        where Data is the actual dataset, and Datafile is the
+        actual filename, and Reference is the logbook reference
+        stripped of all suffixes.
+    """
+    with h5py.File(Database,"a") as HF:
+        for Files in FileTypes:              # Loop over the specified filetypes
+            A = glob.glob(Files)             # and generate a list of files
+            for item in A:
+                AddDatabaseEntry(HF, item)   # Call routine to add a file
+        HF.close() 
+
+
 ################### Speed Distribution Analysis ###################
 
 def amu2kg(Mass):
@@ -178,7 +324,7 @@ def Speed2KER(Data, Mass):
 def KER2Speed(Data, Mass):
     """ Convert kinetic energy in 1/cm to metres per second.
     """
-    Speed = np.zeros(len(Data[0]), dtype=float)
+    Speed = np.zeros(len(Data.keys()[0]), dtype=float)
     for index, energy in enumerate(Data[0]):
         Speed[index] = np.sqrt(((energy / 83.59) * 2000.) / Mass)
     return Speed

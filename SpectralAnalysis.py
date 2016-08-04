@@ -7,18 +7,19 @@ import pandas as pd
 import NotebookTools as NT
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.style.use('seaborn-pastel')
+from matplotlib import cm
 from scipy import constants
 import os
 import peakutils
 from scipy import fftpack
 from scipy import signal
 from scipy import interpolate
-from scipy.optimize import curve_fit, leastsq
+from scipy.optimize import curve_fit, leastsq, least_squares
 from bokeh.palettes import brewer
 from bokeh.plotting import figure, show
 from numba import jit
 import InteractiveWidgets as IW
+import seaborn as sns
 
 # SpectralAnalysis.py
 
@@ -26,6 +27,13 @@ import InteractiveWidgets as IW
 # routines from FittingRoutines.py
 # My plan is to make FittingRoutines obsolete, as it has A LOT of poorly written
 # routines.
+
+###################################################################################################
+
+""" General Plot settings """
+
+matplotlib.style.use(['seaborn-pastel', 'fivethirtyeight'])      # Theme
+D3State = False
 
 ###################################################################################################
 
@@ -65,12 +73,17 @@ class Spectrum:
         self.CalibratedWavelengths = [0., 0.,]
         self.PumpWavelength = 0.
         self.ProbeWavelength = 0.
+        self.Annotations = dict()
         self.Comments = ""
-        if File != None:
-            self.Data = LoadSpectrum(File, CalConstant)
-        if Reference != None:                       # If we give it a logbook reference
+        if Reference is not None:                       # If we give it a logbook reference
             self.Reference = Reference
+        self.Labels = dict()
+        if File is not None:
+            self.Data = LoadSpectrum(File, CalConstant)
+            self.PlotLabels()                       # Only set up plotlabels when we have data
+
         Spectrum.instances.append(self)
+
     def CalibrateWavelengths(self, Wavelengths):
         """ Wavelengths given in as 2-tuple list
         and sets the Dataframe index to the calibrated
@@ -79,58 +92,15 @@ class Spectrum:
         NData = len(self.Data.index)
         NewAxis = np.linspace(num=NData, *Wavelengths)
         self.Data.index = NewAxis
+
+    ###################################### Spectrum I/O ######################################
+
     def AddData(self, NewData, Name):
         self.Data[Name] = NewData
+
     def DeleteData(self, Name):
         del self.Data[Name]
-    def ReadBogScan(self, File):
-        """ Special function for reading data files from
-        BogScan
-        """
-        DataFrame = pd.read_csv(File, delimiter="\t", header=None)
-        if DataFrame[1].sum > 0. == True:                   # If we've got calibrated wavelengths
-            X = np.array(DataFrame[1])
-            print " Using calibrated wavelengths"
-        else:
-            X = np.array(DataFrame[0])
-            print " Using bogscan wavelengths"
-        if DataFrame[2].sum > -100. == True:                # if the axis is negative
-            Y = np.array(DataFrame[2])                      # I like plotting positive!
-        else:
-            Y = -np.array(DataFrame[2])
-        NewDataFrame = FormatData(X, Y)
-        self.Data = NewDataFrame
-    def WidgetPlot(self):
-        self.PlotWidget = IW.PlotContainerGUI(self.Data)
-        try:
-            self.PlotWidget.FigureSetup.PlotTitle.value = self.Reference
-        except AttributeError:
-            pass
-        self.PlotWidget.UpdatePlot(1)   # Random input to make it work
-    def Plot(self, Column="Y Range", Labels=None, Interface="pyplot"):
-        self.PlotLabels(Labels)
-        try:
-            self.Labels["Title"] = self.Reference
-        except AttributeError:
-            pass
-        Target = FormatData(self.Data.index, np.array(self.Data[Column]))
-        PlotData(Target, self.Labels, Interface)
-    def PlotAll(self, Labels=None, Interface="pyplot"):
-        self.PlotLabels(Labels)                     # Initialise labels
-        try:
-            self.Labels["Title"] = self.Reference
-        except AttributeError:                            # Give up if we never gave it a logbook
-            pass
-        PlotData(self.Data, self.Labels, Interface)
-    def PlotLabels(self, Labels=None):
-        if Labels == None:                          # use default labels
-            Labels = {"X Label": "X Axis",
-                      "Y Label": "Y Axis",
-                      "Title": " ",
-                      "X Limits": [min(self.Data.index), max(self.Data.index)],
-                      "Y Limits": [min(self.Data["Y Range"]), max(self.Data["Y Range"])],
-                     }
-        self.Labels = Labels
+
     def ExportData(self, CustomSuffix=False, Suffix=None):
         try:
             os.mkdir("DataExport")
@@ -156,6 +126,11 @@ class Spectrum:
                 FilePath = "./DataExport/" + Reference + Suffix
         self.Data.to_csv(FilePath)
         print " File saved to:\t" + FilePath
+
+    def KERfromPES(self, File, Mass, Units="cm"):
+        self.PES = LoadSpectrum(File, self.CalibrationConstant)
+        self.Data = ConvertSpeedDistribution(self.PES, Mass, Units=Units)
+
     def ExportFits(self, Suffix="_fit.csv"):
         try:
             os.mkdir("FittingResults")
@@ -167,6 +142,95 @@ class Spectrum:
             Reference = raw_input(" No reference found, give me a name.")
             self.FitResults.to_csv("./FittingResults/" + Reference + Suffix)
             print " File saved to:\t" + Reference + Suffix
+
+    def LoadDatabaseSpectrum(self, Database, Reference, Bogscan=False):
+        Data = NT.LoadReference(Database, Reference, Verbose=False)
+        Options = dict()
+        if len(Data.keys()) != 1:       # Only ask if there's more than one file
+            for Index, Key in enumerate(Data.keys()):
+                Options[Index] = Key
+            print Options
+            Selector = int(raw_input(" Please specify which key to load"))
+            Filename = Options[Selector]
+        else:
+            Filename = Data.keys()[0]
+        self.Data = pd.DataFrame(data=Data[Filename])
+        if Bogscan is True:
+            if np.float(self.Data[1].sum()) > 0 is not True:    # Why does this not work
+                self.Data.index = np.array(self.Data[1])
+            else:
+                self.Data.index = np.array(self.Data[0])
+            del self.Data[0]
+            del self.Data[1]
+            del self.Data[3]
+            self.Data.columns = ["Y Range"]
+            if self.Data["Y Range"].sum() > -10. is True:
+                self.Data["Y Range"] = self.Data["Y Range"]     # Make intensity positive
+
+    def ReadBogScan(self, File):
+        """ Special function for reading data files from
+        BogScan
+        """
+        DataFrame = pd.read_csv(File, delimiter="\t", header=None)
+        if DataFrame[1].sum > 0. == True:                   # If we've got calibrated wavelengths
+            X = np.array(DataFrame[1])
+            print " Using calibrated wavelengths"
+        else:
+            X = np.array(DataFrame[0])
+            print " Using bogscan wavelengths"
+        if DataFrame[2].sum > -100. == True:                # if the axis is negative
+            Y = np.array(DataFrame[2])                      # I like plotting positive!
+        else:
+            Y = -np.array(DataFrame[2])
+        NewDataFrame = FormatData(X, Y)
+        self.Data = NewDataFrame
+
+    ###################################### Plotting ######################################
+
+    def WidgetPlot(self):
+        self.PlotWidget = IW.PlotContainerGUI(self.Data)
+        try:
+            self.PlotWidget.FigureSetup.PlotTitle.value = self.Reference
+        except AttributeError:
+            pass
+        self.PlotWidget.UpdatePlot(1)   # Random input to make it work
+
+    def Plot(self, Column="Y Range", Labels=None, Legend=True, Interface="pyplot"):
+        self.PlotLabels()
+        if Labels is not None:
+            self.SetLabels(Labels)
+        Target = FormatData(self.Data.index, np.array(self.Data[Column]))
+        PlotData(DataFrame=Target, Labels=self.Labels, Interface=Interface, Legend=Legend)
+
+    def PlotAll(self, Columns=None, Labels=None, Legend=True, Interface="pyplot", PlotTypes=None):
+        self.PlotLabels()
+        if Labels is not None:
+            self.SetLabels(Labels)
+        if PlotTypes is not None:
+            self.PlotTypes = PlotTypes
+        PlotData(DataFrame=self.Data, Columns=Columns, Labels=self.Labels, Interface=Interface, Legend=Legend, PlotTypes=PlotTypes)
+
+    def PlotLabels(self, Column=None):
+        if Column is None:
+            Column = self.Data.keys()[0]       # if no data is used to initialise
+        Labels = {"X Label": "X Axis",
+                      "Y Label": "Y Axis",
+                      "Title": self.Reference,
+                      "X Limits": [min(self.Data.index), max(self.Data.index)],
+                      "Y Limits": [min(self.Data[Column]), max(self.Data[Column]) + max(self.Data[Column]) * 0.1],
+                     }
+        self.SetLabels(Labels)
+
+    def SetLabels(self, Labels):
+        """ For setting the labels for a plot 
+            If done this way, we can keep whatever is already set
+            unless changed.
+        """
+        for Key in Labels:
+            self.Labels[Key] = Labels[Key]
+
+    ###################################### Analysis ######################################
+
     def Fit(self, Model, Column="Y Range", Interface="pyplot", Verbose=True):
         """ Calls the FitModel function to fit the Data contained in this
         instance.
@@ -190,18 +254,32 @@ class Spectrum:
             elif Verbose == False:
                 pass
             self.Data["Fit Results"] = self.FitResults["Model Fit"]
+            self.Data["Residuals"] = self.FitResults["Residuals"]
         except RuntimeError:
             print ''' No data column eligible for fitting/"Y Range" doesn't exist. '''
             print ''' You may need to repack the data manually using FormatData. '''
-    def DetectPeaks(self, Threshold=0.3, MinimumDistance=30.):
+
+    def DetectPeaks(self, Column=None, Threshold=0.3, MinimumDistance=30.):
         """ Calls the peak finding function from peakutils that will
         sniff up peaks in a spectrum. This class method will then
         store that information as an attribute
         """
-        PeakIndices = PeakFinding(self.Data, Threshold, MinimumDistance)
+        PeakIndices = PeakFinding(self.Data, Column, Threshold, MinimumDistance)
+        PeakX = [self.Data.index[Index] for Index in PeakIndices]
+        PeakY = [1.2 for Peak in PeakIndices]
         self.Peaks = {"Peak Indices": PeakIndices,
                       "Threshold": Threshold,
                       "Minimum Distance": MinimumDistance}
+        for PeakNumber, PeakIndex in enumerate(PeakIndices):
+            self.Annotations[PeakNumber] = {"type": "vline", 
+                                            "position": self.Data.index[PeakIndex], 
+                                            "text": str(PeakNumber)}
+        try: 
+            del self.PeakReport
+        except AttributeError:
+            pass
+        self.PeakReport = pd.DataFrame(data=zip(PeakIndices, PeakX, PeakY), columns=["Indices", "X Value", "Stick"])
+
     def Smooth(self, WindowSize=5, Column="Y Range"):
         """ Smooths the experimental data using a Svatizky-Golay filter
             with the specified window size.
@@ -210,6 +288,25 @@ class Spectrum:
             self.Data[Column + "-Smoothed"] = np.array(NT.SGFilter(self.Data[Column], WindowSize))
         except KeyError:
             print " No column " + Column + " found in DataFrame."
+
+    def NormaliseColumn(self, Columns=["Y Range"]):
+        for Column in Columns:
+            if "-Normalised" not in Column:
+                NormaliseColumn(self.Data, Column=Column)
+            else:
+                pass
+
+    def CalcAvailableEnergy(self, DissociationEnergy):
+        """ Dissociation energy is in 1/cm, this routine calculates
+            the available energy for a spectrum object
+        """
+        if self.PumpWavelength != 0.:
+            self.Eavail = 1e7 / self.PumpWavelength - DissociationEnergy
+        else:
+            self.PumpWavelength = float(raw_input("No pump wavelength found, please specify one."))
+            self.Eavail = 1e7 / self.PumpWavelength - DissociationEnergy
+        return self.Eavail
+
     def BootstrapAnalysis(self, Model, DampFactor=0.5, Trials=100):
         """ Routine that will take a Spectral object and
             perform Bootstrap analysis: will generate synthetic data
@@ -217,7 +314,7 @@ class Spectrum:
             uncertainty
         """
         try:
-            OriginalFit = np.array(self.FitResults["Model Fit"])
+            #OriginalFit = np.array(self.FitResults["Model Fit"])
             OriginalData = np.array(self.FitResults["Data"])
             X = np.array(self.FitResults.index)
         except AttributeError:
@@ -241,6 +338,38 @@ class Spectrum:
         self.BootstrapReport = self.BootstrapResults.describe()
         self.BootstrapReport
         print " Finished analysis. Check object BootstrapReport"
+
+    def IntegrateColumn(self, Column="Y Range", Range=None):
+        """ Return the integral of a column 
+            The range can be specified by a 2-tuple list by
+            supplying the indices to begin and end.
+        """
+        X = np.nan_to_num(self.Data.index)              # Ensure there are no NaNs
+        Y = np.nan_to_num(np.array(self.Data[Column]))  # in our arrays
+        if Range is not None:
+            X = X[Range[0]:Range[1]]
+            Y = Y[Range[0]:Range[1]]
+        return np.trapz(Y, X)
+
+    def CalculateBranching(self):
+        """ Calculate the branching fraction between dataframe items
+            if Y Range is present, we assume it's the experimental
+            data and treat that as the cumulative sum.
+        """
+        Integrals = dict()
+        CumSum = 0.
+        for Key in self.Data:
+            Integrals[Key] = [self.IntegrateColumn(Column=Key)]
+            CumSum = CumSum + self.IntegrateColumn(Column=Key)
+        if "Y Range" in self.Data.keys():
+            CumSum = self.IntegrateColumn(Column="Y Range")
+        for Key in self.Data:
+            Integrals[Key].append(Integrals[Key][0] / CumSum)
+        self.Fractions = pd.DataFrame.from_dict(Integrals)
+        self.Fractions.index = ["Integral", "Fraction"]
+        return self.Fractions
+
+###################################################################################################
 
 class Model:
     """ Class for fitting models and functions. Ideally, I'll have a
@@ -276,7 +405,7 @@ class Model:
     def NewSetFunction(self, FunctionList, Verbose=True):
         self.FunctionList = FunctionList
         self.VariableDict = OrderedDict()
-        for Function in self.FunctionList:
+        for Function in FunctionList:
             self.VariableDict[Function.func_name] = OrderedDict.fromkeys(inspect.getargspec(Function)[0])
             try:
                 del self.VariableDict[Function.func_name]["x"]
@@ -311,13 +440,10 @@ def ConvertSpeedDistribution(DataFrame, Mass, Units="cm"):
     as input, and returns the kinetic energy dataframe with the
     index as the KER, and "Y Range" as P(E).
     """
-    if Units == "cm":        # 1/cm
-        Conversion = 83.59
-    if Units == "kJ":        # kJ/mol
-        Conversion = 1.
-    if Units == "eV":        # eV
-        Conversion = .0103636
-    KER = (np.square(DataFrame.index) * (Mass / 1000.) / 2000.) * Conversion
+    Conversion = {"cm": 83.59,           # Dictionary of unit conversion from
+                  "kJ": 1.,              # kJ/mol to 1/cm and eV
+                  "eV": 0.0103636}
+    KER = (np.square(DataFrame.index) * (Mass / 1000.) / 2000.) * Conversion[Units]
     PE = DataFrame["Y Range"].values / (Mass / 1000. * DataFrame.index)
     PE = [0. if Value < 0. else Value for Value in PE ]           # set negative values to zero
     KERDataFrame = pd.DataFrame(data=PE, index=KER, columns=["Y Range"])
@@ -325,10 +451,24 @@ def ConvertSpeedDistribution(DataFrame, Mass, Units="cm"):
     #for index, value in enumerate(KERDataFrame)
     return KERDataFrame
 
+def ConvertKERDistribution(DataFrame, Mass):
+    Column = DataFrame.keys()[0]              # take the first Y set
+    Speed = np.sqrt(((np.array(DataFrame.index) / 83.59) * 2000.) / (Mass / 1000.))
+    PS = np.array(DataFrame[Column] * (Mass / 1000.)) * DataFrame.index
+    SpeedDataFrame = pd.DataFrame(data=PS, index=Speed, columns=["Y Range"])
+    SpeedDataFrame = SpeedDataFrame.dropna(axis=0)
+    return SpeedDataFrame
+
+def InvertInternalEnergy(DataFrame, MassFraction, Eavail):
+    NewDF = DataFrame.copy()                                 # Copy the dataframe over
+    NewDF.index = NewDF.index / MassFraction                 # Convert to TKER
+    NewDF.index = Eavail - NewDF.index                       # Convert to Internal Energy
+    return NewDF
+
 def NormaliseColumn(DataFrame, Column="Y Range"):
     """ Routine to normalise a column in pandas dataframes
     """
-    DataFrame[Column] = DataFrame[Column] / np.max(DataFrame[Column])
+    DataFrame[Column + "-Normalised"] = DataFrame[Column] / np.max(DataFrame[Column])
 
 def Dict2List(Dictionary):
     List = [Dictionary[Item] for Item in Dictionary]
@@ -400,6 +540,23 @@ def SubtractSpectra(A, B):
     Subtraction = YA - RecastYB
     return FormatData(XA, Subtraction)
 
+def InterpolateDFColumn(DataFrameA, DataFrameB):
+    """ Interpolates the columns of DataFrameA to the
+        index of DataFrameB.
+
+        First match the sizes of the two dataframes,
+        then interpolates the y of Frame A into x of Frame B.
+    """
+    CutDFA, CutDFB = NT.MatchDataFrames(DataFrameA, DataFrameB)
+    NewDF = pd.DataFrame()         # New DF to store the interpolated A values
+    NewX = CutDFB.index            # The values of x we will interpolate to
+    OldX = CutDFA.index            # The old values of x
+    for Key in CutDFA:             # Loop over columns of DataFrameA
+        Interpolant = interpolate.interp1d(OldX, np.array(CutDFA[Key]))
+        NewDF[Key] = Interpolant(NewX)
+    NewDF.index = NewX
+    return NewDF
+
 def UpdateDictionary(OldDictionary, NewValues):
     """ Will loop over keys in new dictionary and set
     them to the old dictionary
@@ -416,6 +573,18 @@ def ConvertOrderedDict(Dictionary):
 ###################################################################################################
 
 """ Fitting functions & Analysis """
+
+def IntegrateColumn(DataFrame, Column="Y Range", Range=None):
+    """ Return the integral of a column 
+        The range can be specified by a 2-tuple list by
+        supplying the indices to begin and end.
+    """
+    X = np.nan_to_num(DataFrame.index)              # Ensure there are no NaNs
+    Y = np.nan_to_num(np.array(DataFrame[Column]))  # in our arrays
+    if Range is not None:
+        X = X[Range[0]:Range[1]]
+        Y = Y[Range[0]:Range[1]]
+    return np.trapz(Y, X)
 
 def FitModel(DataFrame, Model, Column="Y Range", Verbose=False):
     """ Uses an instance of the Model class to fit data contained
@@ -454,35 +623,16 @@ def FitModel(DataFrame, Model, Column="Y Range", Verbose=False):
     FittedCurves = pd.DataFrame(data=zip(DataFrame[Column], ModelFit),
                                          columns=["Data", "Model Fit"],
                                          index=np.array(DataFrame.index, dtype=float))
+    FittedCurves["Residuals"] = DataFrame[Column] - ModelFit
     if Verbose == True:
         print " ------------------------------------------------------"
         print " Parameter Report:"
         print ParameterReport
         CheckCovariance(CovarianceMatrix)
+        print " ------------------------------------------------------"
+        print " Mean-signed-error:\t" + str(np.average(np.array(FittedCurves["Residuals"])))
+        print " RMS:\t" + str(np.average(np.square(np.array(FittedCurves["Residuals"]))))
     return OptimisedParameters, ParameterReport, FittedCurves, CovarianceMatrix
-
-class LeastSqObject:
-    def __init__(self, DataFrame, Column="Y Range"):
-        self.Data = DataFrame
-        self.XData = DataFrame.index 
-        self.YData = DataFrame[Column]
-        self.InitialParameters = []
-
-    def SetFunction(self, Function):
-        """ This is the model function that will be used
-            to generate the model data; e.g. np.sin(x)
-        """
-        self.Function = Function
-        def ResidualFunction(self, Parameters):
-            """ Procedurally generate the residual function """
-            return self.YData - self.Function(*Parameters)
-        self.ResidualFunction = ResidualFunction
-
-    def MinimizeFunction(self):
-        self.OptimisedParameters, self.CovarianceMatrix = leastsq(self.ResidualFunction,
-                                                                  self.InitialParameters,
-                                                                  args=(self.XData, self.YData))
-
 
 def LeastSqFit(ResidualFunction, InitialParameters, DataFrame, Column="Y Range"):
     """ Function for using scipy.optimize.leastsq to generically fit
@@ -496,6 +646,106 @@ def LeastSqFit(ResidualFunction, InitialParameters, DataFrame, Column="Y Range")
         exit()
     return leastsq(ResidualFunction, InitialParameters, args=(XData, YData))
 
+def ScipyLinearRegression(DataFrame, Column=None, Intercept=False, Robust=False, Margin=0.1, 
+                          Interface="plotly", Labels=None, Bootstrap=False):
+    """ New version of a linear regression routine, coded as a wrapper
+        for the least squares function from SciPy.
+
+        Taken from the SciPy cookbook:
+        http://scipy-cookbook.readthedocs.io/items/robust_regression.html
+
+        Has the option of doing a robust regression, where outliers
+        are assessed as well during the linear regression.
+
+        FitResults is an object, containing the results of the fits.
+    """
+    if Intercept is False:
+        def LinearResidualFunction(Parameters, XData, YData):
+            """ Residual function where the objectives of the fit are
+                contained in Parameters as a list or nparray
+
+                Intercept is set to zero
+            """
+            return (Parameters[0] * XData) - YData
+    elif Intercept is True:
+        def LinearResidualFunction(Parameters, XData, YData):
+            """ Residual function where the objectives of the fit are
+                contained in Parameters as a list or nparray
+
+                Intercept is fit
+            """
+            return (Parameters[0] * XData + Parameters[1]) - YData
+
+    if Column == None:
+        Y = np.array(DataFrame[DataFrame.keys()[0]].values)     # if none specified, do regression on the first column
+    else:
+        Y = np.array(DataFrame[Column].values)                  # otherwise use the specified column
+    X = np.array(DataFrame.index.values)
+    if Robust == False:
+        LossFunction = "linear"
+        Margin = None                                    # if it's normal linear regression, ignore outlier
+    elif Robust == True:
+        LossFunction = "soft_l1"                         # use 
+
+    InitialGuess = np.zeros(2)                            # initial guess for linear fit are ones
+    FitResults = least_squares(fun=LinearResidualFunction, 
+                               x0=InitialGuess,
+                               loss=LossFunction,
+                               f_scale=Margin,
+                               args=(X, Y))
+    print "--------------------------------------------"
+    print " Optimal parameters:\t" + str(FitResults.x)
+    FittedY = Linear(X, *FitResults.x)
+    SSResiduals = np.sum(np.square(FittedY - Y))
+    SSY = np.sum(np.square(Y - np.average(Y)))
+    print " R**2 value:\t" + str(1. - SSResiduals / SSY)
+    print "--------------------------------------------"
+    if Bootstrap == True:
+        Parameters = []
+        NTrials = 100 
+        for Trial in xrange(NTrials):
+            SimulatedY = AddNoise(FittedY)
+            BootstrapResults = least_squares(fun=LinearResidualFunction, 
+                                             x0=InitialGuess,
+                                             loss=LossFunction,
+                                             f_scale=Margin,
+                                             args=(X, SimulatedY))
+            Parameters.append(BootstrapResults.x)
+        print " Bootstrap analysis results:"
+        print " Averages:\t" + str(np.average(Parameters, axis=0))
+        print " Sigma:\t" + str(np.std(Parameters, axis=0))
+        FitResults.BootstrapAverage = np.average(Parameters, axis=0)
+        FitResults.BootstrapStdDev = np.std(Parameters, axis=0)
+    print "--------------------------------------------"
+    DataFrame = pd.DataFrame(data=zip(Y, FittedY),
+                             index=X,
+                             columns=["Y Range", "Linear Regression"])
+    PlotData(DataFrame, 
+             Interface=Interface,
+             Labels=Labels
+             )
+    return DataFrame, FitResults
+
+def LinearRegression(DataFrame, Columns=None, Labels=None):
+    RegressionReport = dict()
+    LinearModel = Model("Linear regression model")       # Set up regression model
+    if Columns is None:
+        Columns = list(DataFrame.keys())            # Default is regress all columns
+    with NT.suppress_stdout():
+        # Supress output
+        LinearModel.SetFunction(Linear)
+        for Data in Columns:
+            if "-Regression" in Data:         # No need to regress more than once!
+                pass
+            else:
+                Opt, Report, Fits, Cov = FitModel(DataFrame, Model=LinearModel, Column=Data, Verbose=False)
+                DataFrame[Data + "-Regression"] = Linear(DataFrame.index, *Opt)    # Plot the curves
+                RegressionReport[Data] = Report
+                if (Data + "-Regression") not in Columns:
+                    Columns.append(Data + "-Regression")
+    fig, ax = PlotData(DataFrame=DataFrame, Columns=Columns, Labels=Labels)
+    return RegressionReport
+
 def CheckCovariance(CovarianceMatrix, Threshold=1E-2):
     OffDiagonalElements = NT.CheckOffDiagonal(CovarianceMatrix)
     ThresholdedElements = [Element for Element in OffDiagonalElements if Element >= Threshold]
@@ -503,15 +753,44 @@ def CheckCovariance(CovarianceMatrix, Threshold=1E-2):
         print str(len(ThresholdedElements)) + " elements of covariance matrix larger than\t" + str(Threshold)
         print " Check your privilege!"
 
-def PeakFinding(DataFrame, Threshold=0.3, MinimumDistance=30.):
+def ProgressionFitting(PeakNumbers, PeakReport, Offset=0):
+    """ Function for fitting a second order polynomial to a set of peaks
+        in some hope of finding out what the shit Ethane is...
+
+        Takes PeakNumbers as a list or array of integers corresponding to the
+        peak numbers we want to assign to a progression, and PeakReport which
+        holds the locations, indices and intensities for the peaks.
+
+        Offset will shift the M counter (arbitrary J effectively).
+    """
+    Locations = []
+    NPeaks = len(PeakNumbers)
+    for Peak in PeakNumbers:
+        Locations.append(PeakReport.iloc[Peak]["X Value"])              # Find the actual peak values
+
+    """ Set up the model """
+    PolynomialModel = Model("2nd order polynomial fit")
+    PolynomialModel.SetFunction(SecondOrderPolynomial)                  # set fitting function as quadratic
+
+    ProgressionObject = Spectrum(Reference="Progression")
+    ProgressionObject.Data = pd.DataFrame(data=Locations, index=np.arange(Offset, Offset+NPeaks), columns=["Y Range"])
+    ProgressionObject.Labels = {"X Label": "M","Y Label": "Energy","Title": "Progression Fit"}
+    ProgressionObject.Fit(PolynomialModel, Verbose=True,)
+    return ProgressionObject
+
+def PeakFinding(DataFrame, Column=None, Threshold=0.3, MinimumDistance=30.):
     """ Routine that will sniff out peaks in a spectrum, and fit them with Gaussian functions
     I have no idea how well this will work, but it feels like it's gonna get pretty
     complicated pretty quickly
     """
-    PeakIndices = peakutils.indexes(DataFrame["Y Range"], thres=Threshold, min_dist=MinimumDistance)
+    if Column is None:
+        Column = DataFrame.keys()[0]         # if nothing supplied, use the first column
+        print "No column specified, using " + Column
+    PeakIndices = peakutils.indexes(DataFrame[Column], thres=Threshold, min_dist=MinimumDistance)
     NPeaks = len(PeakIndices)
     print " Found \t" + str(NPeaks) + "\t peaks."
-    StickSpectrum = np.zeros((len(DataFrame["Y Range"])), dtype=float)
+    StickSpectrum = np.zeros((len(DataFrame[Column])), dtype=float)
+    Intensities = []
     for Index in PeakIndices:
         StickSpectrum[Index] = 1.
     DataFrame["Stick Spectrum"] = StickSpectrum
@@ -529,24 +808,36 @@ def VMICalibration(Spectrum):
     Spectrum.PlotLabels()
     from bokeh.io import output_notebook
     output_notebook()
-    Spectrum.PlotAll(Interface="bokeh")
+    Spectrum.PlotAll(Interface="plotly")
     NLines = int(raw_input(" Number of peaks used for calibration?"))
     PeakAssignments = ["3P", "5P", "3S", "5S"]
     PeakDict = OrderedDict()
     for n in xrange(NLines):
         PeakDict[PeakAssignments[n]] = int(raw_input(" Index for peak:\t" + PeakAssignments[n]))
-    print Dict2List(OxygenAtomSpeed)
-    CalibrationData = FormatData(X=Dict2List(PeakDict).sort(), Y=Dict2List(OxygenAtomSpeed).sort())
+    CalibrationData = FormatData(X=sorted(Dict2List(PeakDict)), Y=sorted(Dict2List(OxygenAtomSpeed)))
     LinearRegression = Model("Linear Regression")
     LinearRegression.SetFunction(Linear)
-    LinearRegression.SetVariables({"Gradient": 5.,
+    LinearRegression.SetVariables({"Gradient": 16.,
                                    "Offset": 10.})
-    popt, report, fits, pcov = FitModel(CalibrationData, LinearRegression)
-    Labels = {"Title": "Calibration for:\t" + Spectrum.Reference,
+    try:
+        popt, report, fits, pcov = FitModel(CalibrationData, LinearRegression)
+        Labels = {"Title": "Calibration for:    " + Spectrum.Reference,
               "X Label": "Pixel speed",
               "Y Label": "Oxygen atom speed",
               }
-    PlotData(fits, Labels)
+        PlotData(fits, Labels)
+    except TypeError:
+        print " Could not automatically fit data. Please try it manually. "
+        report = 0.
+    finally:
+        return report, fits
+
+def DataFrameDistances(DataFrame, PeaksRange=[0,5]):
+    DistancesDataFrame = pd.DataFrame()
+    for PeakNumber in range(PeaksRange[0], PeaksRange[1]):       # Loop over all indices
+        PeakPosition = DataFrame.index[PeakNumber]
+        DistancesDataFrame[PeakNumber] = np.abs(DataFrame.index - PeakPosition)
+    return DistancesDataFrame
 
 def AddNoise(Y, DampFactor=0.5):
     """
@@ -570,6 +861,29 @@ def AddNoise(Y, DampFactor=0.5):
         Iterator.iternext()                         # Next iteration of loop
     return NewData
 
+def HistogramBin(Array, Bins="auto", KDE=True, Plot=False):
+    Histogram, Bins = np.histogram(Array,
+                                   bins=Bins,
+                                   density=KDE,
+                                   )
+    DataFrame = pd.DataFrame(data=Histogram, index=Bins[:-1], columns=["Histogram"])
+    if Plot is True:
+        PlotData(DataFrame, PlotTypes={"Histogram": "bar"})
+    else:
+        pass
+    return DataFrame
+
+def AnisotropyAveraging(Spectrum, PixelRange=[165,195]):
+    """ Calculates the average anisotropy value for a range of pixels
+        in an angular distribution.
+    """
+    BetaValues = []                                   # list that stores the beta values
+    for Pixel in range(PixelRange[0], PixelRange[1]):                   # loop over pixels
+        PixelValue = Spectrum.Data.index[NT.find_nearest(Spectrum.Data.index, Pixel)]
+        BetaValues.append(Spectrum.Data["Beta"][PixelValue])       # find the beta value at a given pixel
+    BetaValues = np.array(BetaValues)
+    return np.average(BetaValues, axis=0), np.std(BetaValues, axis=0)
+
 ###################################################################################################
 
 """ Commonly used base functions """
@@ -586,8 +900,17 @@ def BoltzmannFunction(x, Amplitude, Temperature):
     #return Amplitude * np.exp(1) / (kcm * Temperature) * x * np.exp(- x / (kcm * Temperature))
     return Amplitude * np.sqrt(1 / (2 * np.pi * kcm * Temperature)**3) * 4 * np.pi * x * np.exp(-(x) / (kcm * Temperature))
 
+def SecondOrderPolynomial(x, A, B, C):
+    return (A * x**2.) + (B * x) + C
+
 def Linear(x, Gradient, Offset):
     return x * Gradient + Offset
+
+def PriorFunction(x, A, i, j):
+    return A * (x**i) * (1. - x)**j
+
+def SingleExponential(x, Amplitude, Gradient, Offset):
+    return Amplitude * np.exp(Gradient * (x + Offset))
 
 @jit
 def ConvolveArrays(A, B, method="new"):
@@ -642,6 +965,19 @@ def LoadSpectrum(File, CalConstant=1.):
     DataFrame = DataFrame.dropna(axis=0)                          # removes all NaN values
     return DataFrame
 
+def DatabaseSpectrum(Database, Reference):
+    Data = NT.LoadReference(Database, Reference)
+    Filename = raw_input("Please specify which spectrum to load.")
+    SelectedData = Data[Filename]
+    DataFrame = pd.DataFrame(data=SelectedData[:,2],
+                             index=SelectedData[:,1],
+                             columns=["Y Range"])
+    return DataFrame
+
+def TDLWavenumber(DataFrame):
+    Wavenumber = 2e7 / DataFrame.index + 1e7 / (1064.464)
+    DataFrame.index = Wavenumber
+
 def GenerateJComb(DataFrame, TransitionEnergies, Offset=1.3, Teeth=0.2, SelectJ=10):
     """ Function for generating a rotational comb spectrum as an annotation
     Not elegant, but it works!
@@ -676,20 +1012,91 @@ def PickleSpectra(DataBase):
 			pass
 	NT.SaveObject(PickleDictionary, DataBase)
 
-def PlotData(DataFrame, Labels=None, Interface="pyplot"):
+def SetupPyplotTypes(Key, Scaling=None, Colours=None, PlotType=None):
+    """ Programatically select the kind of plots we can
+        produce. Use PlotType as input for the kind of
+        plot, and this function will return the appropriate pyplot
+        function as well as a dictionary of settings
+
+        Colours is a dictionary containing the colour of each bar and
+        scatter plot.
+
+        Key is the name of the column in the DataFrame.
+
+        Scaling is a tuple which dynamically scales the size of markers
+        according to the number of data points.
+    """
+    Wrappers = {"scatter": plt.scatter,         # dictionary of pyplot functions
+                "bar": plt.bar,
+                "line": plt.plot}
+    DefaultSettings = {"scatter": {"s": 150. * Scaling,  # settings for each
+                                   "alpha": 0.7,        # kind of plot
+                                   "label": Key,
+                                   "c": Colours[Key]
+                                  },
+                        "line": {"alpha": 0.8,
+                                 "antialiased": True,
+                                 "label": Key},
+                        "bar": {"alpha": 0.8,
+                                "width": 0.5,
+                                "align": "center",
+                                "color": Colours[Key],
+                                "label": Key}
+                       }
+    """ Set up the initial default settings before modifying """
+    if PlotType == None:                        # default plot type is scatter
+        Settings = DefaultSettings["scatter"]
+    else:
+        Settings = DefaultSettings[PlotType]
+    try:
+        print Settings[PlotType]["c"]
+    except KeyError:
+        pass
+    return Wrappers[PlotType], Settings
+
+def PlotData(DataFrame, Labels=None, Columns=None, Legend=True, Interface="pyplot", PlotTypes=None, Annotations=None):
     """ A themed data plotting routine. Will use either matplotlib or
     bokeh to plot everything in an input dataframe, where the index is
     the X axis.
+
+    PlotTypes is a dictionary input with the same keys as the DataFrame
+    columns.
+
+    Labels is a dictionary containing the axis plot settings.
     """
-    NCols = len(DataFrame.columns)                            # Get the number of columns
-    if NCols <= 2:
-        Colours = ["blue", "red"]
-    else:
-        Colours = brewer["Spectral"][NCols]                   # Set colours depending on how many
-    Headers = list(DataFrame.columns.values)                  # Get the column heads
+    if Columns is None:
+        Columns = DataFrame.keys()
+    Headers = DataFrame.keys()                  # Get the column heads
     if Interface == "pyplot":                                 # Use matplotlib library
-        plt.figure(figsize=(12,6))
-        if Labels != None:
+        fig = plt.figure(figsize=(12,8))
+        plt.margins(0.2)                                # Margins from the edges of the plot
+        #plt.axes(frameon=True)
+        ax = fig.gca()
+
+        """ Set up the kinds of plots that will be displayed.
+            Plots is a dictionary that holds the kind of plot for each
+            column in DataFrame.
+        """
+        Plots = dict()
+        for Key in Columns:
+            if (type(Key) is str) == True:       # check if header is string, skip if not                       
+                Exists = NT.CheckString(Key, ["Model", "Regression", "Fit", "Smoothed"])
+                if Exists is True:
+                    Plots[Key] = "line"        # if the data is actually a fitted model
+                elif Exists is False:
+                    Plots[Key] = "scatter"     # Initialise default plots to scatter
+
+        """ If there are specific plot types requested,
+            update the dictionary.
+        """
+        if PlotTypes is not None:           # Only update if there are
+            for Key in PlotTypes:          # specified plot types
+                Plots[Key] = PlotTypes[Key]
+        else:
+            pass
+
+        """ Set up the plot labels for the axes. """
+        if Labels is not None:
             try:                                              # Unpack whatever we can from Labels
                 plt.xlabel(Labels["X Label"], fontsize=18.)
                 plt.ylabel(Labels["Y Label"], fontsize=18.)
@@ -698,16 +1105,43 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
                 plt.ylim(Labels["Y Limits"])
             except KeyError:                    # Will ignore whatever isn't given in dictionary
                 pass
-        for index, Data in enumerate(DataFrame):
-            plt.scatter(DataFrame.index, DataFrame[Data],           # Plots with direct reference
-                     color=Colours[index])     # Aesthetics with index
-            plt.plot(DataFrame.index, DataFrame[Data],           # Plots with direct reference
-                     antialiased=True,
-                     color=Colours[index], label=Headers[index])     # Aesthetics with index
-        plt.legend(ncol=2, loc=9)
+
+        """ Set up the colours used for scatter and bar plots """
+        Colours = dict()
+        ColourCounts = 0
+        for Key in Plots:                                # Count the number of bar/scatter plots
+            Colours[Key] = "blue"
+            if Plots[Key] is "scatter" or "bar":
+                ColourCounts = ColourCounts + 1
+        ColourMap = cm.Accent(np.linspace(0, 1, ColourCounts))   # Interpolate colours
+        for Index, Key in enumerate(Plots):                      # Assign colour to plot
+            Colours[Key] = ColourMap[Index]
+
+        Scaling = 1. / ((DataFrame.shape[0]))**(1. / 12.)   # Scale the marker sizes to number of elements
+        """ Loop over each column in the DataFrame. """
+        for Key in Columns:
+            """ Determine what kind of plot is needed, and the
+                settings to go with it.
+            """
+            PlotFunction, PlotSettings = SetupPyplotTypes(Key=Key,
+                                                          Scaling=Scaling,
+                                                          PlotType=Plots[Key],
+                                                          Colours=Colours,
+                                                          )
+            PlotFunction(DataFrame.index, DataFrame[Key], **PlotSettings)
+        if Legend is True:
+            plt.legend(ncol=1, loc=0)
+        ax.grid()
+        #ax.set_autoscale(enable=True, tight=True)
         plt.show()
     elif Interface == "bokeh":                                # Use bokeh library
+        NCols = len(DataFrame.columns)                            # Get the number of columns
+        if NCols <= 2:
+            Colours = ["blue", "red"]
+        else:
+            Colours = brewer["Spectral"][NCols]                   # Set colours depending on how many
         tools = "pan, wheel_zoom, box_zoom, reset, resize, hover"
+        ax = None                                             # Not used with Bokeh
         if Labels != None:
             try:                                              # Unpack whatever we can from Labels
                 XLabel = Labels["X Label"]
@@ -715,7 +1149,7 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
                 Title = Labels["Title"]
                 XRange = Labels["X Limits"]
                 YRange = Labels["Y Limits"]
-                plot = figure(width=700, height=400,                        # set up the labels
+                fig = figure(width=700, height=400,                        # set up the labels
                               x_axis_label=XLabel, y_axis_label=YLabel,
                               title=Title, tools=tools,
                               x_range=XRange, y_range=YRange)
@@ -723,13 +1157,30 @@ def PlotData(DataFrame, Labels=None, Interface="pyplot"):
                 print " Not using labels"
                 pass
         else:
-            plot = figure(width=700, height=400, tools=tools)               # if we have no labels
-        plot.background_fill_color="beige"
+            fig = figure(width=700, height=400, tools=tools)               # if we have no labels
+        fig.background_fill_color="beige"
         for index, Data in enumerate(DataFrame):
-            plot.scatter(x=DataFrame.index, y=DataFrame[Data],
+            fig.scatter(x=DataFrame.index, y=DataFrame[Data],
                       line_width=2, color=Colours[index],
                       legend=Headers[index])
-            plot.line(x=DataFrame.index, y=DataFrame[Data],
+            fig.line(x=DataFrame.index, y=DataFrame[Data],
                       line_width=2, color=Colours[index],
                       legend=Headers[index])
-        show(plot)
+        show(fig)
+    elif Interface == "plotly":                                # Plotly interface
+        import PlottingTools as PT 
+        PT.XYPlot(DataFrame=DataFrame,
+                  Columns=Columns,
+                  CustomPlotTypes=PlotTypes,
+                  Labels=Labels,
+                  Annotations=Annotations
+                  )
+        fig, ax = (None, None)
+    return fig, ax
+
+def ToggleD3():
+    import mpld3
+    if D3State is False:
+        mpld3.enable_notebook()
+    elif D3State is True:
+        mpld3.disable_notebook()

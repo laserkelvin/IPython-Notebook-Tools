@@ -202,13 +202,23 @@ class Spectrum:
         Target = FormatData(self.Data.index, np.array(self.Data[Column]))
         PlotData(DataFrame=Target, Labels=self.Labels, Interface=Interface, Legend=Legend)
 
-    def PlotAll(self, Columns=None, Labels=None, Legend=True, Interface="pyplot", PlotTypes=None):
+    def PlotAll(self, Columns=None, Labels=None, Legend=True, Interface="pyplot", PlotTypes=None, ShowAnnotations=True):
         self.PlotLabels()
+        Annotations = None
         if Labels is not None:
             self.SetLabels(Labels)
         if PlotTypes is not None:
             self.PlotTypes = PlotTypes
-        PlotData(DataFrame=self.Data, Columns=Columns, Labels=self.Labels, Interface=Interface, Legend=Legend, PlotTypes=PlotTypes)
+        if ShowAnnotations is True:
+            Annotations = self.Annotations 
+        PlotData(DataFrame=self.Data, 
+                 Columns=Columns, 
+                 Labels=self.Labels, 
+                 Interface=Interface, 
+                 Legend=Legend, 
+                 PlotTypes=PlotTypes,
+                 Annotations=Annotations
+                 )
 
     def PlotLabels(self, Column=None):
         if Column is None:
@@ -806,9 +816,16 @@ def VMICalibration(Spectrum):
     Threshold = float(raw_input(" Threshold for peak detection:"))
     Spectrum.DetectPeaks(Threshold=Threshold)
     Spectrum.PlotLabels()
-    from bokeh.io import output_notebook
-    output_notebook()
-    Spectrum.PlotAll(Interface="plotly")
+    #from bokeh.io import output_notebook
+    #output_notebook()
+    Spectrum.PlotAll(Interface="plotly", 
+                     Columns=["Y Range"],
+                     Labels={"X Label": "Pixel speed",
+                             "Y Label": "P(s)", 
+                             "Title": "Uncalibrated speed distribution"
+                             },
+                     PlotTypes={"Y Range": "line"},
+                     )
     NLines = int(raw_input(" Number of peaks used for calibration?"))
     PeakAssignments = ["3P", "5P", "3S", "5S"]
     PeakDict = OrderedDict()
@@ -892,6 +909,12 @@ def BaseGaussian(x, x0):
     """ The most vanilla of Gaussians, wrote it when I was debugging
     """
     return np.exp(-np.square(x-x0))
+
+def ScottGaussian(x, Amplitude, Centre, Width):
+    """ This version of the Gaussian I used for the convolution fitting
+        Notably, the width is given as the full width, not half!
+    """
+    return Amplitude * np.exp(-(Centre - x)**2. / Width**2.)
 
 def GaussianFunction(x, Amplitude, Centre, Width):
     return Amplitude * (1 / (Width * np.sqrt(2 * np.pi))) * np.exp(-np.square(x - Centre) / (2 * Width**2))
